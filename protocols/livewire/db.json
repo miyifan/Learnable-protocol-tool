@@ -1,21 +1,45 @@
 {
-  "name": "job",
+  "name": "任务下发",
   "protocol_id_hex": "db",
   "protocol_id_dec": "219",
   "protocol_id": "db",
-  "description": "基于 livewire 创建的新协议",
+  "description": "任务下发",
   "hex_data": "5b0000db00e4c3eaa6fd65de6501ba2b00100101b057000000000000000000000068000040a0000040a000004080000040c000004120000000000000005a000a27100000000000001e04000000ba000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000068000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
   "fields": [
     {
-      "name": "t4",
-      "start_pos": 52,
-      "end_pos": 55,
-      "type": "u32",
-      "endian": "big",
+      "name": "触发扭矩",
+      "start_pos": 36,
+      "end_pos": 39,
+      "type": "float",
+      "endian": "little",
       "description": ""
     },
     {
-      "name": "t3",
+      "name": "临界扭矩",
+      "start_pos": 40,
+      "end_pos": 43,
+      "type": "float",
+      "endian": "little",
+      "description": ""
+    },
+    {
+      "name": "目标扭矩",
+      "start_pos": 48,
+      "end_pos": 51,
+      "type": "float",
+      "endian": "little",
+      "description": ""
+    },
+    {
+      "name": "最小扭矩",
+      "start_pos": 44,
+      "end_pos": 47,
+      "type": "float",
+      "endian": "little",
+      "description": ""
+    },
+    {
+      "name": "最大扭矩",
       "start_pos": 52,
       "end_pos": 55,
       "type": "float",
@@ -23,10 +47,26 @@
       "description": ""
     },
     {
-      "name": "t2",
-      "start_pos": 52,
-      "end_pos": 55,
-      "type": "float",
+      "name": "最小角度",
+      "start_pos": 56,
+      "end_pos": 57,
+      "type": "hex",
+      "endian": "little",
+      "description": ""
+    },
+    {
+      "name": "最大角度",
+      "start_pos": 60,
+      "end_pos": 61,
+      "type": "hex",
+      "endian": "little",
+      "description": ""
+    },
+    {
+      "name": "转速",
+      "start_pos": 62,
+      "end_pos": 63,
+      "type": "hex",
       "endian": "little",
       "description": ""
     }

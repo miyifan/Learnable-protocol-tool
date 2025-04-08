@@ -1,0 +1,35 @@
+{
+  "name": "Establish the connection",
+  "protocol_id_hex": "a0",
+  "protocol_id_dec": "160",
+  "protocol_id": "a0",
+  "description": "Establish the connection",
+  "hex_data": "5b0000a0003400001f08386737fb070000000000000001000022d91f0088000000000000000000000000000000000000000000000000000000000005ffff0000",
+  "fields": [
+    {
+      "name": "SessionID",
+      "start_pos": 12,
+      "end_pos": 13,
+      "type": "u16",
+      "endian": "little",
+      "description": ""
+    },
+    {
+      "name": "infoType",
+      "start_pos": 14,
+      "end_pos": 14,
+      "type": "u8",
+      "endian": "little",
+      "description": "Set fixed to 7"
+    },
+    {
+      "name": "ucCommLayer",
+      "start_pos": 15,
+      "end_pos": 15,
+      "type": "string",
+      "endian": "little",
+      "description": "Set fixed to 0"
+    }
+  ],
+  "group": "establish the connection"
+}

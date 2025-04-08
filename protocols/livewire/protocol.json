@@ -1,0 +1,10 @@
+{
+  "name": "livewire",
+  "protocol_id_hex": "0",
+  "protocol_id": "0",
+  "protocol_id_dec": "0",
+  "description": "espec2",
+  "type": "protocol",
+  "fields": [],
+  "group": "livewire"
+}

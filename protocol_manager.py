@@ -255,15 +255,39 @@ class ProtocolManager:
     
     def get_protocol_by_key(self, protocol_key):
         """根据键获取协议"""
+        print(f"尝试通过键获取协议: {protocol_key}")
+        print(f"当前协议键列表: {list(self.protocols.keys())}")
+        
         # 先从协议字典中查找
         if protocol_key in self.protocols:
+            print(f"在protocols字典中找到键: {protocol_key}")
             return self.protocols[protocol_key]
             
-        # 再从命令字典中查找
+        # 如果键包含斜杠，尝试分离组名和ID
+        if '/' in protocol_key:
+            group, id_part = protocol_key.split('/', 1)
+            
+            # 检查是否在该组下找到对应ID的命令
+            if group in self.protocol_commands:
+                print(f"检查组 {group} 下是否有ID为 {id_part} 的命令")
+                for protocol_name, commands in self.protocol_commands.items():
+                    if id_part in commands:
+                        print(f"在命令字典中找到匹配: {protocol_name}/{id_part}")
+                        return commands[id_part]
+        
+        # 直接在命令字典中查找ID
         for protocol_name, commands in self.protocol_commands.items():
             if protocol_key in commands:
+                print(f"在命令字典中找到键: {protocol_key}")
                 return commands[protocol_key]
-                
+        
+        # 如果找不到，循环打印所有协议命令键值，帮助调试
+        print("未找到协议，打印当前所有命令情况:")
+        for protocol_name, commands in self.protocol_commands.items():
+            print(f"- 协议 {protocol_name} 的命令列表:")
+            for cmd_id, cmd in commands.items():
+                print(f"  - 命令ID: {cmd_id}, 名称: {cmd.get('name', '')}")
+        
         return None
     
     def find_matching_protocol(self, hex_data):
@@ -344,22 +368,67 @@ class ProtocolManager:
             
         return tree
 
-    def add_protocol_field(self, protocol_key, field_data):
-        """向指定协议添加字段定义"""
-        if protocol_key in self.protocols:
-            protocol = self.protocols[protocol_key]
-            
-            # 确保有字段列表
-            if 'fields' not in protocol:
-                protocol['fields'] = []
-            
-            # 添加新字段
-            protocol['fields'].append(field_data)
-            
-            # 保存更新后的协议
-            return self.save_protocol(protocol)
+    def add_protocol_field(self, protocol_key, field_name, field_type, start_pos, field_length):
+        """添加协议字段"""
+        protocol = self.get_protocol_by_key(protocol_key)
+        if not protocol:
+            print(f"要添加字段的协议不存在: {protocol_key}")
+            return False, f"字段添加失败: 协议 {protocol_key} 不存在"
         
-        return False, f"协议 {protocol_key} 不存在"
+        print(f"向协议 {protocol_key} 添加字段: {field_name}")
+        
+        # 确定正确的目标对象
+        target_obj = protocol
+        
+        # 如果是命令类型，确保目标是该命令对象
+        if protocol.get('type') == 'command':
+            group = protocol.get('group', '')
+            command_id = protocol.get('protocol_id_hex', '')
+            
+            print(f"这是一个命令，组名:{group}, 命令ID:{command_id}")
+            
+            # 检查命令字典中是否已存在该命令
+            protocol_name = protocol.get('protocol_name', '')
+            if protocol_name in self.protocol_commands and command_id in self.protocol_commands[protocol_name]:
+                target_obj = self.protocol_commands[protocol_name][command_id]
+                print(f"找到命令对象: {target_obj.get('name', '未命名')}")
+        
+        # 初始化fields字段
+        if 'fields' not in target_obj:
+            target_obj['fields'] = []
+        
+        # 确保字段名不重复
+        for field in target_obj['fields']:
+            if field['name'] == field_name:
+                return False, f"字段添加失败: 字段名 {field_name} 已存在"
+        
+        # 计算结束位置
+        end_pos = start_pos + field_length - 1
+        
+        # 添加新字段
+        new_field = {
+            'name': field_name,
+            'type': field_type,
+            'start_pos': start_pos,
+            'end_pos': end_pos,
+            'endian': 'little'  # 默认使用小端序
+        }
+        target_obj['fields'].append(new_field)
+        
+        # 保存更新后的协议
+        if protocol.get('type') == 'command':
+            group = protocol.get('group', '')
+            command_id = protocol.get('protocol_id_hex', '')
+            success, message = self.save_command(group, command_id, target_obj)
+            print(f"保存命令结果: {success}, {message}")
+        else:
+            success, message = self.save_protocol(target_obj)
+            print(f"保存协议结果: {success}, {message}")
+        
+        if not success:
+            return False, f"字段添加失败: {message}"
+        
+        return True, "字段添加成功"
 
     def remove_protocol_field(self, protocol_key, field_index):
         """从指定协议中删除字段"""
@@ -913,3 +982,46 @@ class ProtocolManager:
         else:
             # 创建空表格
             pd.DataFrame({'信息': ['未找到有效的协议定义']}).to_excel(writer, sheet_name='协议字段详情', index=False)
+
+    def save_command(self, group, command_id, command_data):
+        """保存命令数据到文件"""
+        # 确保命令数据包含必要的字段
+        command_data["protocol_id_hex"] = command_id
+        command_data["protocol_id"] = command_id
+        command_data["group"] = group
+        command_data["type"] = "command"
+        
+        try:
+            # 计算十进制值
+            command_data["protocol_id_dec"] = str(int(command_id, 16))
+        except ValueError:
+            command_data["protocol_id_dec"] = "未知"
+        
+        # 创建协议命令目录
+        protocol_dir = self.data_dir / group
+        protocol_dir.mkdir(exist_ok=True, parents=True)
+        
+        # 命令文件以命令ID命名
+        file_path = protocol_dir / f"{command_id}.json"
+        
+        try:
+            print(f"保存命令到文件: {file_path}")
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(command_data, f, ensure_ascii=False, indent=2)
+            
+            # 更新内存中的命令数据
+            full_key = f"{group}/{command_id}"
+            self.protocols[full_key] = command_data
+            
+            # 更新命令字典
+            protocol_name = command_data.get("protocol_name", "")
+            if protocol_name:
+                if protocol_name not in self.protocol_commands:
+                    self.protocol_commands[protocol_name] = {}
+                self.protocol_commands[protocol_name][command_id] = command_data
+            
+            print(f"命令保存成功: {full_key}")
+            return True, f"命令已保存: {command_id} (十进制: {command_data.get('protocol_id_dec', '未知')}) 到 {group}"
+        except Exception as e:
+            print(f"保存命令失败: {e}")
+            return False, f"保存命令失败: {e}"

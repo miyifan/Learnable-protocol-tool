@@ -1168,8 +1168,20 @@ class HexParserTool:
         try:
             if data['action'] == 'add_field':
                 if 'field_data' in data:
-                    print(f"添加字段到命令 {command_key}: {data['field_data'].get('name', '')}")
-                    success, message = self.protocol_manager.add_protocol_field(command_key, data['field_data'])
+                    field_data = data['field_data']
+                    field_name = field_data.get('name', '')
+                    field_type = field_data.get('type', '')
+                    start_pos = field_data.get('start_pos', 0)
+                    end_pos = field_data.get('end_pos', 0)
+                    
+                    print(f"添加字段到命令 {command_key}: {field_name}")
+                    print(f"字段信息: 类型={field_type}, 起始位置={start_pos}, 结束位置={end_pos}")
+                    
+                    # 计算长度作为第四个参数
+                    field_length = end_pos - start_pos + 1
+                    
+                    success, message = self.protocol_manager.add_protocol_field(
+                        command_key, field_name, field_type, start_pos, field_length)
                     
                     # 刷新当前命令数据
                     if success:
@@ -1194,12 +1206,15 @@ class HexParserTool:
                     if field_index < 0 or field_index >= len(command['fields']):
                         return {'success': False, 'message': '无效的字段索引'}
                     
-                    print(f"更新命令 {command_key} 字段: {data['field_data'].get('name', '')}, 索引: {field_index}")
+                    field_data = data['field_data']
+                    print(f"更新命令 {command_key} 字段: {field_data.get('name', '')}, 索引: {field_index}")
                     # 更新字段
-                    command['fields'][field_index] = data['field_data']
+                    command['fields'][field_index] = field_data
                     
                     # 保存命令
-                    success, message = self.protocol_manager.save_protocol(command)
+                    group = command.get('group', '')
+                    cmd_id = command.get('protocol_id_hex', '')
+                    success, message = self.protocol_manager.save_command(group, cmd_id, command)
                     
                     # 刷新当前命令数据
                     if success:

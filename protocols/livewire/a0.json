@@ -1,0 +1,20 @@
+{
+  "name": "Command COMM_CMD_CONNECT",
+  "protocol_id_hex": "a0",
+  "protocol_id_dec": "160",
+  "protocol_id": "a0",
+  "description": "This command should be the first command sent by the client to start the communication and receive some\n basic information about the server",
+  "hex_data": "5b0000a0003400001f08386737fb070000000000000001000022d91f0088000000000000000000000000000000000000000000000000000000000005ffff0000",
+  "type": "command",
+  "fields": [
+    {
+      "name": "sessionId",
+      "type": "u16",
+      "start_pos": 12,
+      "end_pos": 13,
+      "endian": "little"
+    }
+  ],
+  "protocol_name": "livewire",
+  "group": "livewire"
+}

@@ -1261,6 +1261,7 @@ class ProtocolFieldDialog(tk.Toplevel):
             "ascii": "ASCII字符串(英文)",
             "utf8": "UTF-8字符串(支持中文)",
             "string": "通用字符串",
+            "char": "UTF-8字符串(支持中文，推荐使用)",
             
             # 特殊类型
             "date": "日期(YYYYMMDD格式)",

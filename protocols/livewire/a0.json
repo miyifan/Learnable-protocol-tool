@@ -13,6 +13,21 @@
       "start_pos": 12,
       "end_pos": 13,
       "endian": "little"
+    },
+    {
+      "name": "infoType",
+      "start_pos": 14,
+      "end_pos": 14,
+      "type": "char",
+      "endian": "little",
+      "description": ""
+    },
+    {
+      "name": "ucCommLayer",
+      "type": "char",
+      "start_pos": 15,
+      "end_pos": 15,
+      "endian": "little"
     }
   ],
   "protocol_name": "livewire",

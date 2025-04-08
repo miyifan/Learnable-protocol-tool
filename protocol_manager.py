@@ -463,17 +463,18 @@ class ProtocolManager:
     def get_supported_field_types(self):
         """获取支持的字段类型列表"""
         return [
-            # 整数类型
+            # 将uxx、float、char、double、时间戳、bool放在最上面
             "u8", "u16", "u32", "u64", 
-            "i8", "i16", "i32", "i64",
-            # 浮点类型
             "float", "double",
+            "char", # 替代string类型
+            "timestamp", 
+            "bool",
             # 文本类型
-            "ascii", "utf8", "string",
+            "ascii", "utf8", 
             # 特殊类型
-            "date", "timestamp", "hex", 
+            "date", "hex", 
             # 其他类型
-            "bytes", "bool"
+            "bytes"
         ]
 
     def parse_protocol_data(self, hex_data, protocol):
@@ -596,6 +597,58 @@ class ProtocolManager:
                 except:
                     return hex_data
             
+            elif field_type == 'char':
+                # 专门用于显示字符串，优先使用UTF-8编码支持中文
+                try:
+                    # 检查是否只包含数字和常见ASCII字符
+                    is_simple_ascii = all(c in '0123456789abcdefABCDEF' for c in hex_data)
+                    # 如果全是数字，可能是纯数字字符串，直接显示原始16进制
+                    if is_simple_ascii and len(hex_data) <= 8:
+                        # 可能是纯数字，尝试显示数值
+                        value = int(hex_data, 16)
+                        return str(value)
+                        
+                    # 对于ASCII范围内的字符，直接用ASCII解码可能更好
+                    is_ascii_range = True
+                    for i in range(0, len(hex_data), 2):
+                        if i+1 < len(hex_data):
+                            byte_val = int(hex_data[i:i+2], 16)
+                            if byte_val > 127:
+                                is_ascii_range = False
+                                break
+                    
+                    if is_ascii_range:
+                        result = bytes.fromhex(hex_data).decode('ascii', errors='replace')
+                        # 检查结果是否包含问号(解码失败标志)
+                        if '' not in result:
+                            return result
+                    
+                    # 尝试其他编码
+                    # 先尝试UTF-8
+                    utf8_result = bytes.fromhex(hex_data).decode('utf-8', errors='replace')
+                    if '' not in utf8_result:
+                        return utf8_result
+                    
+                    # 再尝试GB2312
+                    try:
+                        gb_result = bytes.fromhex(hex_data).decode('gb2312', errors='replace')
+                        if '' not in gb_result:
+                            return gb_result
+                    except:
+                        pass
+                        
+                    # 最后尝试latin1（总能成功，但可能不是正确的编码）
+                    latin_result = bytes.fromhex(hex_data).decode('latin1', errors='replace')
+                    
+                    # 如果最终结果仍然包含大量替换字符，直接返回16进制
+                    if latin_result.count('') > len(latin_result) / 3:
+                        return f"0x{hex_data}"
+                    
+                    return latin_result
+                except Exception as e:
+                    print(f"字符解码失败: {e}")
+                    return f"0x{hex_data}"
+            
             elif field_type == 'hex':
                 # 保持原始16进制形式，但格式化为带0x前缀的形式
                 return '0x' + hex_data.upper()
@@ -640,11 +693,14 @@ class ProtocolManager:
                 return f"时间戳格式错误: {hex_data}"
                 
             elif field_type in ['string', 'STRING']:
-                # 尝试将16进制转换为ASCII字符串
+                # 尝试将16进制转换为UTF-8字符串，支持中文
                 try:
-                    return bytes.fromhex(hex_data).decode('ascii', errors='ignore')
+                    return bytes.fromhex(hex_data).decode('utf-8', errors='replace')
                 except:
-                    return hex_data
+                    try:
+                        return bytes.fromhex(hex_data).decode('gb2312', errors='replace')
+                    except:
+                        return hex_data
                     
             elif field_type in ['bytes', 'CUSTOM']:
                 return hex_data

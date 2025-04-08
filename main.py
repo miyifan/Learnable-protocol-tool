@@ -475,6 +475,12 @@ class HexParserTool:
                     ascii_start = f"{line}.{ascii_index}"
                     ascii_end = f"{line}.{ascii_index + 1}"
                     self.output_text.tag_add("selection", ascii_start, ascii_end)
+                
+                # 安全地尝试提升selection标签的优先级
+                try:
+                    self.output_text.tag_raise("selection", "defined_field")
+                except Exception:
+                    pass
         
         # 检查点击位置是否在ASCII部分
         ascii_start_index = line_text.find('|') + 1
@@ -504,6 +510,12 @@ class HexParserTool:
                 ascii_end = f"{line}.{col + 1}"
                 self.output_text.tag_add("selection", ascii_start, ascii_end)
                 self.output_text.tag_config("selection", background="yellow", foreground="black")
+                
+                # 安全地尝试提升selection标签的优先级
+                try:
+                    self.output_text.tag_raise("selection", "defined_field")
+                except Exception:
+                    pass
         
         # 否则禁用文本框编辑
         else:
@@ -572,6 +584,12 @@ class HexParserTool:
                 # 如果已选定协议，启用定义字段按钮
                 if hasattr(self, 'current_protocol'):
                     self.define_field_btn.config(state=tk.NORMAL)
+                    
+                    # 安全地尝试提升selection标签的优先级
+                    try:
+                        self.output_text.tag_raise("selection", "defined_field")
+                    except Exception:
+                        pass
             
             # 禁用文本框编辑
             self.output_text.config(state=tk.DISABLED)
@@ -658,7 +676,14 @@ class HexParserTool:
                     ascii_end = f"{line}.{ascii_start_index + end_byte_index + 1}"
                     self.output_text.tag_add("selection", ascii_start, ascii_end)
         
+        # 配置选中的高亮样式
         self.output_text.tag_config("selection", background="yellow", foreground="black")
+        
+        # 安全地尝试提升selection标签的优先级
+        try:
+            self.output_text.tag_raise("selection", "defined_field")
+        except Exception:
+            pass
     
     def _get_selected_byte_range(self):
         """获取当前选中的字节范围"""
@@ -676,36 +701,50 @@ class HexParserTool:
             start_line, start_col = map(int, str(start).split('.'))
             end_line, end_col = map(int, str(end).split('.'))
             
-            # 计算行偏移
-            line_offsets = []
-            for line in range(1, end_line + 1):
-                line_text = self.output_text.get(f"{line}.0", f"{line}.end")
-                if ":" in line_text:
-                    offset_str = line_text.split(':', 1)[0].strip()
-                    try:
-                        line_offsets.append(int(offset_str, 16))
-                    except ValueError:
-                        line_offsets.append(0)
-                else:
-                    line_offsets.append(0)
-            
-            # 计算起始字节位置
+            # 获取所有可见行的文本内容，提取每行的偏移量
             bytes_per_line = self.bytes_per_line.get()
             
-            # 确保列位置在字节边界
-            start_byte_in_line = (start_col - 6) // 3
-            end_byte_in_line = (end_col - 6) // 3
+            # 更精确地获取每行的实际偏移量
+            all_lines = self.output_text.get("1.0", tk.END).split('\n')
+            line_offsets = []
             
+            for i, line_text in enumerate(all_lines):
+                if i >= len(all_lines) - 1:  # 忽略最后一个可能为空的行
+                    break
+                    
+                if ":" in line_text:
+                    offset_part = line_text.split(':', 1)[0].strip()
+                    try:
+                        # 16进制偏移量转换为十进制
+                        offset = int(offset_part, 16)
+                        line_offsets.append(offset)
+                    except ValueError:
+                        # 如果转换失败，使用行号*每行字节数作为估计
+                        line_offsets.append(i * bytes_per_line)
+                else:
+                    # 没有偏移量的行使用前一行的偏移量加上每行字节数
+                    if line_offsets:
+                        line_offsets.append(line_offsets[-1] + bytes_per_line)
+                    else:
+                        line_offsets.append(0)
+            
+            # 计算起始位置和结束位置对应的实际字节偏移
             if start_line <= len(line_offsets):
-                start_byte = line_offsets[start_line-1] + start_byte_in_line
+                # 计算当前行内的偏移量
+                start_byte_in_line = (start_col - 6) // 3
+                # 总偏移量 = 行偏移量 + 行内偏移量
+                start_byte = line_offsets[start_line - 1] + start_byte_in_line
             else:
                 return None
             
             if end_line <= len(line_offsets):
-                end_byte = line_offsets[end_line-1] + end_byte_in_line
-                # 检查末尾位置是否刚好在字节边界
+                # 计算当前行内的偏移量
+                end_byte_in_line = (end_col - 6) // 3
+                # 如果选择刚好在字节边界结束(落在空格上)，需要减1
                 if (end_col - 6) % 3 == 0:
-                    end_byte -= 1
+                    end_byte_in_line -= 1
+                # 总偏移量 = 行偏移量 + 行内偏移量
+                end_byte = line_offsets[end_line - 1] + end_byte_in_line
             else:
                 return None
             
@@ -969,6 +1008,9 @@ class HexParserTool:
                                         lambda e, f=field: self._on_field_click(e, f))
         
         self.parse_text.config(state=tk.DISABLED)
+        
+        # 高亮显示已定义字段
+        self._highlight_defined_fields(protocol, hex_data)
 
     def _on_field_click(self, event, field):
         """字段名称点击事件处理"""
@@ -1061,6 +1103,9 @@ class HexParserTool:
             self.current_protocol_key = protocol_key
             self.view_template_btn.config(state=tk.NORMAL)
             
+            # 高亮显示已定义的字段
+            self._highlight_defined_fields(protocol, self.raw_hex_data)
+            
         else:
             # 返回的是协议
             protocol = matched
@@ -1091,6 +1136,9 @@ class HexParserTool:
                 self.current_protocol_key = protocol_key
                 self.view_template_btn.config(state=tk.NORMAL)
                 
+                # 高亮显示已定义的字段
+                self._highlight_defined_fields(protocol, self.raw_hex_data)
+                
                 # 如果当前数据包含命令ID，检查是否需要创建新命令
                 if len(self.raw_hex_data) >= 8:
                     command_id_hex = self.raw_hex_data[6:8]
@@ -1109,6 +1157,92 @@ class HexParserTool:
                             ProtocolSelectionDialog(
                                 self.root, self.raw_hex_data, self._save_protocol_callback,
                                 parent_protocol=protocol)
+
+    def _highlight_defined_fields(self, protocol, hex_data):
+        """高亮显示已定义的字段区域"""
+        if not protocol or 'fields' not in protocol or not protocol.get('fields'):
+            return
+            
+        # 清除之前的高亮
+        self.output_text.config(state=tk.NORMAL)
+        self.output_text.tag_remove("defined_field", "1.0", tk.END)
+        
+        # 遍历协议中的所有字段
+        for field in protocol.get('fields', []):
+            start_pos = field.get('start_pos', 0)
+            end_pos = field.get('end_pos', 0)
+            
+            if start_pos is None or end_pos is None or start_pos > end_pos:
+                continue
+                
+            # 获取所有可见行的文本内容，提取每行的偏移量
+            bytes_per_line = self.bytes_per_line.get()
+            all_lines = self.output_text.get("1.0", tk.END).split('\n')
+            line_offsets = []
+            
+            for i, line_text in enumerate(all_lines):
+                if i >= len(all_lines) - 1:  # 忽略最后一个可能为空的行
+                    break
+                    
+                if ":" in line_text:
+                    offset_part = line_text.split(':', 1)[0].strip()
+                    try:
+                        offset = int(offset_part, 16)
+                        line_offsets.append((i+1, offset))  # 存储行号和偏移量
+                    except ValueError:
+                        continue
+            
+            # 找出字段对应的文本位置并高亮
+            for line_num, offset in line_offsets:
+                line_text = all_lines[line_num-1]
+                
+                # 检查这一行是否包含字段的部分
+                line_start = offset
+                line_end = offset + bytes_per_line - 1
+                
+                # 判断字段与当前行是否有交集
+                if not (end_pos < line_start or start_pos > line_end):
+                    # 计算这一行中需要高亮的字节范围
+                    highlight_start = max(start_pos, line_start)
+                    highlight_end = min(end_pos, line_end)
+                    
+                    # 转换为行内偏移量
+                    line_byte_start = highlight_start - line_start
+                    line_byte_end = highlight_end - line_start
+                    
+                    # 计算文本位置 - 包括字节之间的空格
+                    # 对于开始位置，确保从字节的起始位置开始
+                    text_start_col = 6 + line_byte_start * 3  # 每个字节占3列（2个字符+1个空格）
+                    
+                    # 对于结束位置，确保包含最后一个字节后的空格(如果有的话)
+                    # 如果是行尾最后一个字节，就不加额外空格
+                    is_last_byte_in_line = (line_byte_end == bytes_per_line - 1)
+                    text_end_col = 6 + line_byte_end * 3 + (2 if is_last_byte_in_line else 3)
+                    
+                    # 添加高亮标签
+                    text_start = f"{line_num}.{text_start_col}"
+                    text_end = f"{line_num}.{text_end_col}"
+                    
+                    # 高亮十六进制部分
+                    self.output_text.tag_add("defined_field", text_start, text_end)
+                    
+                    # 高亮ASCII部分
+                    ascii_start_index = line_text.find('|') + 1
+                    if ascii_start_index > 0:
+                        ascii_start = f"{line_num}.{ascii_start_index + line_byte_start}"
+                        ascii_end = f"{line_num}.{ascii_start_index + line_byte_end + 1}"
+                        self.output_text.tag_add("defined_field", ascii_start, ascii_end)
+            
+        # 配置高亮样式 - 使用淡灰色背景
+        self.output_text.tag_config("defined_field", background="#E5E5E5")
+        
+        # 安全地尝试提升selection标签的优先级
+        try:
+            self.output_text.tag_raise("selection", "defined_field")
+        except Exception:
+            pass
+        
+        self.output_text.config(state=tk.DISABLED)
 
     def _define_protocol_field(self):
         """定义协议字段"""

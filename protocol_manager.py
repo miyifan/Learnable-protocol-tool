@@ -739,73 +739,122 @@ class ProtocolManager:
     def generate_protocol_doc(self, protocol_key=None, output_format="docx"):
         """生成协议文档，可以是单个协议或所有协议"""
         try:
+            # 检查是否有协议可用
+            if not self.protocols:
+                return False, "没有可用的协议，请先添加协议"
+                
             # 导入文档生成库
             if output_format == "docx":
-                from docx import Document
-                from docx.shared import Pt, Cm
-                from docx.enum.text import WD_ALIGN_PARAGRAPH
-                document = Document()
-                
-                # 设置文档标题
-                title = document.add_heading('协议文档', level=0)
-                title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
-                # 生成协议头部分
-                self._generate_header_doc(document, protocol_key)
-                
-                # 生成协议号列表
-                self._generate_protocol_list_doc(document, protocol_key)
-                
-                # 生成每个协议的命令字段详情
-                self._generate_protocol_fields_doc(document, protocol_key)
-                
-                # 保存文档
-                import datetime
-                filename = f"协议文档_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-                document.save(filename)
-                return True, f"文档已生成: {filename}"
+                try:
+                    from docx import Document
+                    from docx.shared import Pt, Cm, RGBColor
+                    from docx.enum.text import WD_ALIGN_PARAGRAPH
+                    from docx.oxml.ns import qn
+                    import datetime
+                    
+                    document = Document()
+                    
+                    # 设置默认字体为微软雅黑
+                    style = document.styles['Normal']
+                    style.font.name = '微软雅黑'
+                    style.font.size = Pt(10)
+                    # 中文字体设置
+                    style._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                    
+                    # 设置文档标题
+                    title = document.add_heading('协议文档', level=0)
+                    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    # 设置标题字体为微软雅黑
+                    for run in title.runs:
+                        run.font.name = '微软雅黑'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                    
+                    # 生成协议头部分
+                    self._generate_header_doc(document, protocol_key)
+                    
+                    # 生成协议号列表
+                    self._generate_protocol_list_doc(document, protocol_key)
+                    
+                    # 生成每个协议的命令字段详情
+                    self._generate_protocol_fields_doc(document, protocol_key)
+                    
+                    # 保存文档
+                    filename = f"协议文档_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+                    document.save(filename)
+                    return True, f"文档已生成: {filename}"
+                    
+                except ImportError:
+                    return False, "缺少python-docx库，请安装: pip install python-docx"
+                except Exception as e:
+                    return False, f"生成Word文档时出错: {str(e)}"
                 
             elif output_format == "xlsx":
-                import pandas as pd
-                import openpyxl
-                from openpyxl.styles import Alignment, Font
+                try:
+                    import pandas as pd
+                    import openpyxl
+                    from openpyxl.styles import Alignment, Font, PatternFill
+                    import datetime
+                    
+                    # 创建Excel文件
+                    filename = f"协议文档_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    writer = pd.ExcelWriter(filename, engine='openpyxl')
+                    
+                    # 生成协议头表格
+                    self._generate_header_excel(writer, protocol_key)
+                    
+                    # 生成协议号列表
+                    self._generate_protocol_list_excel(writer, protocol_key)
+                    
+                    # 生成每个协议的命令字段详情
+                    self._generate_protocol_fields_excel(writer, protocol_key)
+                    
+                    # 设置所有工作表的字体为微软雅黑
+                    workbook = writer.book
+                    for sheet_name in workbook.sheetnames:
+                        worksheet = workbook[sheet_name]
+                        for row in worksheet.rows:
+                            for cell in row:
+                                if cell.value:
+                                    cell.font = Font(name='微软雅黑', size=10)
+                    
+                    # 保存文件
+                    writer.close()
+                    return True, f"Excel文档已生成: {filename}"
                 
-                # 创建Excel文件
-                writer = pd.ExcelWriter(f"协议文档_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", 
-                                    engine='openpyxl')
-                
-                # 生成协议头表格
-                self._generate_header_excel(writer, protocol_key)
-                
-                # 生成协议号列表
-                self._generate_protocol_list_excel(writer, protocol_key)
-                
-                # 生成每个协议的命令字段详情
-                self._generate_protocol_fields_excel(writer, protocol_key)
-                
-                # 保存文件
-                writer.save()
-                return True, f"Excel文档已生成: {writer.path}"
+                except ImportError:
+                    return False, "缺少pandas或openpyxl库，请安装: pip install pandas openpyxl"
+                except Exception as e:
+                    return False, f"生成Excel文档时出错: {str(e)}"
             
             else:
                 return False, "不支持的输出格式"
                 
-        except ImportError as e:
-            return False, f"缺少必要的库: {str(e)}，请安装python-docx或pandas库"
         except Exception as e:
             return False, f"生成文档时出错: {str(e)}"
     
     def _generate_header_doc(self, document, protocol_key=None):
         """生成协议头部分文档"""
-        document.add_heading('1. 协议头定义', level=1)
-        document.add_paragraph('协议头定义了所有协议共用的起始字段结构')
+        from docx.shared import Pt
+        from docx.oxml.ns import qn
+        
+        heading = document.add_heading('1. 协议头定义', level=1)
+        # 设置标题字体
+        for run in heading.runs:
+            run.font.name = '微软雅黑'
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+        
+        para = document.add_paragraph('协议头定义了所有协议共用的起始字段结构')
+        # 设置段落字体
+        for run in para.runs:
+            run.font.name = '微软雅黑'
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
         
         # 添加协议头表格
         if protocol_key and protocol_key in self.protocols:
             protocols = [self.protocols[protocol_key]]
         else:
-            # 如果没有指定协议，使用第一个协议的头或创建空表格
-            protocols = list(self.protocols.values())
+            # 如果没有指定协议，只过滤type为protocol的协议
+            protocols = [p for p in self.protocols.values() if p.get('type') == 'protocol']
         
         if protocols:
             protocol = protocols[0]
@@ -821,6 +870,14 @@ class ProtocolManager:
                 hdr_cells[1].text = '字节类型'
                 hdr_cells[2].text = '字段说明'
                 
+                # 设置表头字体
+                for cell in hdr_cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.name = '微软雅黑'
+                            run.font.bold = True
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                
                 # 填充数据
                 for field in header_fields:
                     row_cells = table.add_row().cells
@@ -828,25 +885,62 @@ class ProtocolManager:
                     byte_count = field.get('end_pos', 0) - field.get('start_pos', 0) + 1
                     row_cells[1].text = f"{field.get('type', '')}({byte_count})"
                     row_cells[2].text = field.get('description', '')
+                    
+                    # 设置数据单元格字体
+                    for cell in row_cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                run.font.name = '微软雅黑'
+                                run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
             else:
-                document.add_paragraph('未定义协议头字段')
+                para = document.add_paragraph('未定义协议头字段')
+                for run in para.runs:
+                    run.font.name = '微软雅黑'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
         else:
-            document.add_paragraph('未找到有效的协议定义')
+            para = document.add_paragraph('未找到有效的协议定义')
+            for run in para.runs:
+                run.font.name = '微软雅黑'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
     
     def _generate_protocol_list_doc(self, document, protocol_key=None):
         """生成协议号列表文档"""
-        document.add_heading('2. 协议号列表', level=1)
-        document.add_paragraph('按照协议号从小到大排序')
+        from docx.shared import Pt
+        from docx.oxml.ns import qn
+        
+        heading = document.add_heading('2. 协议号列表', level=1)
+        # 设置标题字体
+        for run in heading.runs:
+            run.font.name = '微软雅黑'
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+        
+        para = document.add_paragraph('按照协议号从小到大排序')
+        # 设置段落字体
+        for run in para.runs:
+            run.font.name = '微软雅黑'
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
         
         # 筛选协议
         if protocol_key and protocol_key in self.protocols:
-            protocols = [self.protocols[protocol_key]]
+            protocol = self.protocols[protocol_key]
+            if protocol.get('type') == 'protocol':
+                protocols = [protocol]
+            else:
+                # 如果指定了命令，找到其所属的协议
+                protocol_name = protocol.get('protocol_name', '')
+                protocols = [p for p in self.protocols.values() 
+                          if p.get('type') == 'protocol' and p.get('name') == protocol_name]
         else:
-            protocols = list(self.protocols.values())
+            # 只选择类型为protocol的协议
+            protocols = [p for p in self.protocols.values() if p.get('type') == 'protocol']
         
         if protocols:
             # 按协议号排序
-            sorted_protocols = sorted(protocols, key=lambda p: int(p.get('protocol_id_dec', '0') or '0'))
+            try:
+                sorted_protocols = sorted(protocols, key=lambda p: int(p.get('protocol_id_dec', '0') or '0'))
+            except (ValueError, TypeError):
+                # 如果排序失败，使用原始顺序
+                sorted_protocols = protocols
             
             table = document.add_table(rows=1, cols=2)
             table.style = 'Table Grid'
@@ -856,6 +950,14 @@ class ProtocolManager:
             hdr_cells[0].text = '协议号'
             hdr_cells[1].text = '协议说明'
             
+            # 设置表头字体
+            for cell in hdr_cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.name = '微软雅黑'
+                        run.font.bold = True
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+            
             # 填充数据
             for protocol in sorted_protocols:
                 row_cells = table.add_row().cells
@@ -863,28 +965,84 @@ class ProtocolManager:
                 protocol_id_dec = protocol.get('protocol_id_dec', '')
                 row_cells[0].text = f"0x{protocol_id} ({protocol_id_dec})"
                 row_cells[1].text = f"{protocol.get('name', '')} - {protocol.get('description', '')}"
+                
+                # 设置数据单元格字体
+                for cell in row_cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.name = '微软雅黑'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
         else:
-            document.add_paragraph('未找到有效的协议定义')
+            para = document.add_paragraph('未找到有效的协议定义')
+            for run in para.runs:
+                run.font.name = '微软雅黑'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
     
     def _generate_protocol_fields_doc(self, document, protocol_key=None):
         """生成协议字段详情文档"""
-        document.add_heading('3. 协议字段详情', level=1)
+        from docx.shared import Pt
+        from docx.oxml.ns import qn
+        
+        heading = document.add_heading('3. 协议字段详情', level=1)
+        # 设置标题字体
+        for run in heading.runs:
+            run.font.name = '微软雅黑'
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
         
         # 筛选协议
         if protocol_key and protocol_key in self.protocols:
-            protocols = [self.protocols[protocol_key]]
+            specified_protocol = self.protocols[protocol_key]
+            
+            if specified_protocol.get('type') == 'protocol':
+                # 如果指定的是一个协议，获取此协议及其所有命令
+                protocol_name = specified_protocol.get('name', '')
+                protocol_commands = self.get_protocol_commands(protocol_name)
+                
+                # 只包含指定的协议
+                protocols = [specified_protocol]
+                
+                # 添加此协议的所有命令
+                protocols.extend(protocol_commands.values()) if protocol_commands else None
+            else:
+                # 如果指定的是一个命令，只显示该命令
+                protocols = [specified_protocol]
         else:
+            # 如果没有指定协议，显示所有协议和命令
             protocols = list(self.protocols.values())
         
-        if protocols:
-            for protocol in protocols:
+        # 按类型分组：先显示所有协议，再显示所有命令
+        protocol_types = {'protocol': [], 'command': []}
+        
+        for protocol in protocols:
+            protocol_type = protocol.get('type', 'unknown')
+            if protocol_type in protocol_types:
+                protocol_types[protocol_type].append(protocol)
+        
+        # 处理所有协议
+        if protocol_types['protocol']:
+            try:
+                # 按协议ID排序
+                protocol_types['protocol'].sort(key=lambda p: int(p.get('protocol_id_dec', '0') or '0'))
+            except (ValueError, TypeError):
+                pass  # 如果排序失败，使用原始顺序
+            
+            for i, protocol in enumerate(protocol_types['protocol']):
                 protocol_name = protocol.get('name', '未命名协议')
                 protocol_id = protocol.get('protocol_id_hex', '')
                 protocol_id_dec = protocol.get('protocol_id_dec', '')
                 
                 # 添加协议标题
-                document.add_heading(f"3.{protocol_id_dec} {protocol_name} (0x{protocol_id})", level=2)
-                document.add_paragraph(protocol.get('description', '无描述'))
+                sub_heading = document.add_heading(f"3.{i+1} {protocol_name} (0x{protocol_id})", level=2)
+                # 设置子标题字体
+                for run in sub_heading.runs:
+                    run.font.name = '微软雅黑'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                
+                para = document.add_paragraph(protocol.get('description', '无描述'))
+                # 设置段落字体
+                for run in para.runs:
+                    run.font.name = '微软雅黑'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
                 
                 # 添加字段表格
                 fields = protocol.get('fields', [])
@@ -898,6 +1056,14 @@ class ProtocolManager:
                     hdr_cells[1].text = '字节类型'
                     hdr_cells[2].text = '字段说明'
                     
+                    # 设置表头字体
+                    for cell in hdr_cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                run.font.name = '微软雅黑'
+                                run.font.bold = True
+                                run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                    
                     # 填充数据
                     for field in fields:
                         row_cells = table.add_row().cells
@@ -905,13 +1071,107 @@ class ProtocolManager:
                         byte_count = field.get('end_pos', 0) - field.get('start_pos', 0) + 1
                         row_cells[1].text = f"{field.get('type', 'unknown')}({byte_count})"
                         row_cells[2].text = field.get('description', '')
+                        
+                        # 设置数据单元格字体
+                        for cell in row_cells:
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    run.font.name = '微软雅黑'
+                                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
                 else:
-                    document.add_paragraph('此协议未定义字段')
+                    para = document.add_paragraph('此协议未定义字段')
+                    # 设置字体
+                    for run in para.runs:
+                        run.font.name = '微软雅黑'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
                 
                 # 添加分隔符
                 document.add_paragraph()
-        else:
-            document.add_paragraph('未找到有效的协议定义')
+        
+        # 处理所有命令
+        if protocol_types['command']:
+            cmd_heading = document.add_heading('4. 命令字段详情', level=1)
+            # 设置标题字体
+            for run in cmd_heading.runs:
+                run.font.name = '微软雅黑'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+            
+            try:
+                # 按协议ID排序
+                protocol_types['command'].sort(key=lambda p: int(p.get('protocol_id_dec', '0') or '0'))
+            except (ValueError, TypeError):
+                pass  # 如果排序失败，使用原始顺序
+            
+            for i, command in enumerate(protocol_types['command']):
+                command_name = command.get('name', '未命名命令')
+                command_id = command.get('protocol_id_hex', '')
+                command_id_dec = command.get('protocol_id_dec', '')
+                protocol_name = command.get('protocol_name', '')
+                
+                # 添加命令标题
+                cmd_sub_heading = document.add_heading(f"4.{i+1} {command_name} (0x{command_id})", level=2)
+                # 设置子标题字体
+                for run in cmd_sub_heading.runs:
+                    run.font.name = '微软雅黑'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                
+                para = document.add_paragraph(f"协议: {protocol_name} - {command.get('description', '无描述')}")
+                # 设置段落字体
+                for run in para.runs:
+                    run.font.name = '微软雅黑'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                
+                # 添加字段表格
+                fields = command.get('fields', [])
+                if fields:
+                    table = document.add_table(rows=1, cols=3)
+                    table.style = 'Table Grid'
+                    
+                    # 设置表头
+                    hdr_cells = table.rows[0].cells
+                    hdr_cells[0].text = '字段名称'
+                    hdr_cells[1].text = '字节类型'
+                    hdr_cells[2].text = '字段说明'
+                    
+                    # 设置表头字体
+                    for cell in hdr_cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                run.font.name = '微软雅黑'
+                                run.font.bold = True
+                                run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                    
+                    # 填充数据
+                    for field in fields:
+                        row_cells = table.add_row().cells
+                        row_cells[0].text = field.get('name', '??')
+                        byte_count = field.get('end_pos', 0) - field.get('start_pos', 0) + 1
+                        row_cells[1].text = f"{field.get('type', 'unknown')}({byte_count})"
+                        row_cells[2].text = field.get('description', '')
+                        
+                        # 设置数据单元格字体
+                        for cell in row_cells:
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    run.font.name = '微软雅黑'
+                                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                else:
+                    para = document.add_paragraph('此命令未定义字段')
+                    # 设置字体
+                    for run in para.runs:
+                        run.font.name = '微软雅黑'
+                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                
+                # 添加分隔符
+                document.add_paragraph()
+        
+        # 如果没有协议和命令
+        if not protocol_types['protocol'] and not protocol_types['command']:
+            para = document.add_paragraph('未找到有效的协议或命令定义')
+            # 设置字体
+            for run in para.runs:
+                run.font.name = '微软雅黑'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
     
     def _generate_header_excel(self, writer, protocol_key=None):
         """生成Excel格式的协议头文档"""
@@ -921,7 +1181,8 @@ class ProtocolManager:
         if protocol_key and protocol_key in self.protocols:
             protocols = [self.protocols[protocol_key]]
         else:
-            protocols = list(self.protocols.values())
+            # 如果没有指定协议，只选择类型为protocol的协议
+            protocols = [p for p in self.protocols.values() if p.get('type') == 'protocol']
         
         if protocols:
             protocol = protocols[0]
@@ -942,39 +1203,54 @@ class ProtocolManager:
                 df = pd.DataFrame(data)
                 df.to_excel(writer, sheet_name='协议头定义', index=False)
                 
-                # 调整列宽
+                # 设置列宽和样式
                 worksheet = writer.sheets['协议头定义']
                 worksheet.column_dimensions['A'].width = 20
                 worksheet.column_dimensions['B'].width = 15
                 worksheet.column_dimensions['C'].width = 40
+                
+                # 设置表头样式
+                from openpyxl.styles import Font, Alignment, PatternFill
+                header_font = Font(name='微软雅黑', bold=True, size=11)
+                header_fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
+                
+                for cell in worksheet[1]:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
             else:
                 # 创建空表格
-                pd.DataFrame({'信息': ['未定义协议头字段']}).to_excel(writer, sheet_name='协议头定义', index=False)
+                df = pd.DataFrame({'提示': ['未定义协议头字段']})
+                df.to_excel(writer, sheet_name='协议头定义', index=False)
         else:
             # 创建空表格
-            pd.DataFrame({'信息': ['未找到有效的协议定义']}).to_excel(writer, sheet_name='协议头定义', index=False)
+            df = pd.DataFrame({'提示': ['未找到有效的协议定义']})
+            df.to_excel(writer, sheet_name='协议头定义', index=False)
     
     def _generate_protocol_list_excel(self, writer, protocol_key=None):
-        """生成Excel格式的协议号列表"""
+        """生成Excel格式的协议列表"""
         import pandas as pd
         
         # 筛选协议
         if protocol_key and protocol_key in self.protocols:
-            protocols = [self.protocols[protocol_key]]
+            protocol = self.protocols[protocol_key]
+            if protocol.get('type') == 'protocol':
+                protocols = [protocol]
+            else:
+                # 如果指定了命令，找到其所属的协议
+                protocol_name = protocol.get('protocol_name', '')
+                protocols = [p for p in self.protocols.values() 
+                          if p.get('type') == 'protocol' and p.get('name') == protocol_name]
         else:
-            protocols = list(self.protocols.values())
+            # 只选择类型为protocol的协议
+            protocols = [p for p in self.protocols.values() if p.get('type') == 'protocol']
         
         if protocols:
-            # 按协议号排序
-            sorted_protocols = sorted(protocols, key=lambda p: int(p.get('protocol_id_dec', '0') or '0'))
-            
             # 准备数据
             data = []
-            for protocol in sorted_protocols:
-                protocol_id = protocol.get('protocol_id_hex', '')
-                protocol_id_dec = protocol.get('protocol_id_dec', '')
+            for protocol in protocols:
                 data.append({
-                    '协议号': f"0x{protocol_id} ({protocol_id_dec})",
+                    '协议号': f"0x{protocol.get('protocol_id_hex', '')} ({protocol.get('protocol_id_dec', '')})",
                     '协议说明': f"{protocol.get('name', '')} - {protocol.get('description', '')}"
                 })
             
@@ -982,13 +1258,24 @@ class ProtocolManager:
             df = pd.DataFrame(data)
             df.to_excel(writer, sheet_name='协议号列表', index=False)
             
-            # 调整列宽
+            # 设置列宽和样式
             worksheet = writer.sheets['协议号列表']
-            worksheet.column_dimensions['A'].width = 20
-            worksheet.column_dimensions['B'].width = 50
+            worksheet.column_dimensions['A'].width = 15
+            worksheet.column_dimensions['B'].width = 40
+            
+            # 设置表头样式
+            from openpyxl.styles import Font, Alignment, PatternFill
+            header_font = Font(name='微软雅黑', bold=True, size=11)
+            header_fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
+            
+            for cell in worksheet[1]:
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = Alignment(horizontal='center', vertical='center')
         else:
             # 创建空表格
-            pd.DataFrame({'信息': ['未找到有效的协议定义']}).to_excel(writer, sheet_name='协议号列表', index=False)
+            df = pd.DataFrame({'提示': ['未找到有效的协议定义']})
+            df.to_excel(writer, sheet_name='协议号列表', index=False)
     
     def _generate_protocol_fields_excel(self, writer, protocol_key=None):
         """生成Excel格式的协议字段详情"""
@@ -996,48 +1283,140 @@ class ProtocolManager:
         
         # 筛选协议
         if protocol_key and protocol_key in self.protocols:
-            protocols = [self.protocols[protocol_key]]
+            specified_protocol = self.protocols[protocol_key]
+            
+            if specified_protocol.get('type') == 'protocol':
+                # 如果指定的是一个协议，获取此协议及其所有命令
+                protocol_name = specified_protocol.get('name', '')
+                protocol_commands = self.get_protocol_commands(protocol_name)
+                
+                # 只包含指定的协议
+                protocols = [specified_protocol]
+                
+                # 添加此协议的所有命令
+                protocols.extend(protocol_commands.values()) if protocol_commands else None
+            else:
+                # 如果指定的是一个命令，只显示该命令
+                protocols = [specified_protocol]
         else:
+            # 如果没有指定协议，显示所有协议和命令
             protocols = list(self.protocols.values())
         
-        if protocols:
-            for protocol in protocols:
+        # 按类型分组：先显示所有协议，再显示所有命令
+        protocol_types = {'protocol': [], 'command': []}
+        
+        for protocol in protocols:
+            protocol_type = protocol.get('type', 'unknown')
+            if protocol_type in protocol_types:
+                protocol_types[protocol_type].append(protocol)
+        
+        # 设置样式相关
+        from openpyxl.styles import Font, Alignment, PatternFill
+        header_font = Font(name='微软雅黑', bold=True, size=11)
+        header_fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
+        
+        # 处理所有协议
+        if protocol_types['protocol']:
+            # 准备协议数据
+            all_protocol_data = []
+            
+            for protocol in protocol_types['protocol']:
                 protocol_name = protocol.get('name', '未命名协议')
                 protocol_id = protocol.get('protocol_id_hex', '')
                 protocol_id_dec = protocol.get('protocol_id_dec', '')
                 
-                # 创建工作表名称
-                sheet_name = f"{protocol_id_dec}_{protocol_name}"
-                if len(sheet_name) > 31:  # Excel工作表名最大长度限制
-                    sheet_name = sheet_name[:30]
-                
-                # 准备字段数据
                 fields = protocol.get('fields', [])
                 if fields:
-                    data = []
                     for field in fields:
                         byte_count = field.get('end_pos', 0) - field.get('start_pos', 0) + 1
-                        data.append({
+                        all_protocol_data.append({
+                            '协议': f"{protocol_name} (0x{protocol_id})",
                             '字段名称': field.get('name', '??'),
                             '字节类型': f"{field.get('type', 'unknown')}({byte_count})",
                             '字段说明': field.get('description', '')
                         })
-                    
-                    # 创建DataFrame并写入Excel
-                    df = pd.DataFrame(data)
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
-                    
-                    # 调整列宽
-                    worksheet = writer.sheets[sheet_name]
-                    worksheet.column_dimensions['A'].width = 20
-                    worksheet.column_dimensions['B'].width = 15
-                    worksheet.column_dimensions['C'].width = 40
                 else:
-                    # 创建空表格
-                    pd.DataFrame({'信息': ['此协议未定义字段']}).to_excel(writer, sheet_name=sheet_name, index=False)
-        else:
-            # 创建空表格
-            pd.DataFrame({'信息': ['未找到有效的协议定义']}).to_excel(writer, sheet_name='协议字段详情', index=False)
+                    all_protocol_data.append({
+                        '协议': f"{protocol_name} (0x{protocol_id})",
+                        '字段名称': '无字段',
+                        '字节类型': '',
+                        '字段说明': ''
+                    })
+            
+            # 创建DataFrame并写入Excel
+            if all_protocol_data:
+                df = pd.DataFrame(all_protocol_data)
+                df.to_excel(writer, sheet_name='协议字段详情', index=False)
+                
+                # 设置列宽和样式
+                worksheet = writer.sheets['协议字段详情']
+                worksheet.column_dimensions['A'].width = 25
+                worksheet.column_dimensions['B'].width = 20
+                worksheet.column_dimensions['C'].width = 15
+                worksheet.column_dimensions['D'].width = 40
+                
+                # 设置表头样式
+                for cell in worksheet[1]:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+            else:
+                # 创建空表格
+                df = pd.DataFrame({'提示': ['协议未定义字段']})
+                df.to_excel(writer, sheet_name='协议字段详情', index=False)
+        
+        # 处理所有命令
+        if protocol_types['command']:
+            # 准备命令数据
+            all_command_data = []
+            
+            for command in protocol_types['command']:
+                command_name = command.get('name', '未命名命令')
+                command_id = command.get('protocol_id_hex', '')
+                protocol_name = command.get('protocol_name', '')
+                
+                fields = command.get('fields', [])
+                if fields:
+                    for field in fields:
+                        byte_count = field.get('end_pos', 0) - field.get('start_pos', 0) + 1
+                        all_command_data.append({
+                            '命令': f"{command_name} (0x{command_id})",
+                            '所属协议': protocol_name,
+                            '字段名称': field.get('name', '??'),
+                            '字节类型': f"{field.get('type', 'unknown')}({byte_count})",
+                            '字段说明': field.get('description', '')
+                        })
+                else:
+                    all_command_data.append({
+                        '命令': f"{command_name} (0x{command_id})",
+                        '所属协议': protocol_name,
+                        '字段名称': '无字段',
+                        '字节类型': '',
+                        '字段说明': ''
+                    })
+            
+            # 创建DataFrame并写入Excel
+            if all_command_data:
+                df = pd.DataFrame(all_command_data)
+                df.to_excel(writer, sheet_name='命令字段详情', index=False)
+                
+                # 设置列宽和样式
+                worksheet = writer.sheets['命令字段详情']
+                worksheet.column_dimensions['A'].width = 25
+                worksheet.column_dimensions['B'].width = 20
+                worksheet.column_dimensions['C'].width = 20
+                worksheet.column_dimensions['D'].width = 15
+                worksheet.column_dimensions['E'].width = 40
+                
+                # 设置表头样式
+                for cell in worksheet[1]:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+            else:
+                # 创建空表格
+                df = pd.DataFrame({'提示': ['命令未定义字段']})
+                df.to_excel(writer, sheet_name='命令字段详情', index=False)
 
     def save_command(self, group, command_id, command_data):
         """保存命令数据到文件"""

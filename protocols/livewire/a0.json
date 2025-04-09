@@ -9,10 +9,11 @@
   "fields": [
     {
       "name": "sessionId",
-      "type": "u16",
       "start_pos": 12,
       "end_pos": 13,
-      "endian": "little"
+      "type": "u16",
+      "endian": "little",
+      "description": "sessionId"
     },
     {
       "name": "infoType",

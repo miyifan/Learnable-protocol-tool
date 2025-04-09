@@ -1400,45 +1400,100 @@ class HexParserTool:
         if not self.protocol_manager.protocols:
             messagebox.showinfo("提示", "没有可用的协议，请先添加协议")
             return
-            
-        # 如果当前有选中的协议，询问是生成当前协议还是所有协议的文档
-        protocol_key = None
-        if hasattr(self, 'current_protocol_key'):
-            if messagebox.askyesno("选择", f"是否只生成当前选中的协议 '{self.current_protocol.get('name', '')}' 的文档?\n\n选择\"否\"将生成所有协议的文档。"):
-                protocol_key = self.current_protocol_key
         
-        # 选择输出格式
-        formats = ["Word文档(.docx)", "Excel表格(.xlsx)"]
-        selected_format = tk.StringVar(value=formats[0])
-        
+        # 创建协议选择对话框
         dialog = tk.Toplevel(self.root)
-        dialog.title("选择文档格式")
-        dialog.geometry("300x150")
+        dialog.title("生成协议文档")
+        dialog.geometry("400x300")
         dialog.transient(self.root)
         dialog.grab_set()
         
-        ttk.Label(dialog, text="请选择输出格式:").pack(pady=(20, 10))
+        # 协议选择区域
+        protocol_frame = ttk.Frame(dialog, padding=10)
+        protocol_frame.pack(fill=tk.X, expand=False)
+        
+        ttk.Label(protocol_frame, text="选择协议:").pack(anchor=tk.W, pady=(0, 5))
+        
+        # 协议选择变量
+        selected_protocol = tk.StringVar(value="所有协议")
+        
+        # 获取所有协议名称列表
+        protocol_list = ["所有协议"]  # 默认选项
+        for protocol in self.protocol_manager.protocols.values():
+            if protocol.get('type', '') == 'protocol':
+                name = protocol.get('name', '')
+                if name and name not in protocol_list:
+                    protocol_list.append(name)
+        
+        # 创建协议选择下拉框
+        protocol_combobox = ttk.Combobox(
+            protocol_frame, 
+            textvariable=selected_protocol,
+            values=protocol_list,
+            width=30,
+            state="readonly"
+        )
+        protocol_combobox.pack(fill=tk.X, pady=(0, 10))
+        protocol_combobox.current(0)  # 默认选择"所有协议"
+        
+        # 文档格式选择区域
+        format_frame = ttk.Frame(dialog, padding=10)
+        format_frame.pack(fill=tk.X, expand=False)
+        
+        ttk.Label(format_frame, text="选择输出格式:").pack(anchor=tk.W, pady=(0, 5))
+        
+        formats = ["Word文档(.docx)", "Excel表格(.xlsx)"]
+        selected_format = tk.StringVar(value=formats[0])
         
         for fmt in formats:
-            ttk.Radiobutton(dialog, text=fmt, variable=selected_format, value=fmt).pack(anchor=tk.W, padx=20)
+            ttk.Radiobutton(format_frame, text=fmt, variable=selected_format, value=fmt).pack(anchor=tk.W, pady=2)
         
-        def on_confirm():
-            fmt = selected_format.get()
-            dialog.destroy()
-            
-            output_format = "docx" if "Word" in fmt else "xlsx"
-            success, message = self.protocol_manager.generate_protocol_doc(protocol_key, output_format)
-            
-            if success:
-                messagebox.showinfo("成功", message)
-            else:
-                messagebox.showerror("错误", message)
+        # 处理生成文档
+        def on_generate():
+            try:
+                fmt = selected_format.get()
+                output_format = "docx" if "Word" in fmt else "xlsx"
+                
+                protocol_name = selected_protocol.get()
+                protocol_key = None
+                
+                # 根据选择的协议名称找到对应的协议键
+                if protocol_name != "所有协议":
+                    for key, protocol in self.protocol_manager.protocols.items():
+                        if protocol.get('type', '') == 'protocol' and protocol.get('name', '') == protocol_name:
+                            protocol_key = key
+                            break
+                
+                # 生成文档
+                success, message = self.protocol_manager.generate_protocol_doc(protocol_key, output_format)
+                
+                dialog.destroy()
+                
+                if success:
+                    messagebox.showinfo("成功", message)
+                else:
+                    messagebox.showerror("错误", message)
+            except Exception as e:
+                dialog.destroy()
+                messagebox.showerror("错误", f"生成文档时出错: {str(e)}")
         
-        button_frame = ttk.Frame(dialog)
-        button_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=10)
+        # 按钮区域
+        button_frame = ttk.Frame(dialog, padding=10)
+        button_frame.pack(side=tk.BOTTOM, fill=tk.X)
         
-        ttk.Button(button_frame, text="确定", command=on_confirm, width=10).pack(side=tk.RIGHT, padx=(0, 20))
-        ttk.Button(button_frame, text="取消", command=dialog.destroy, width=10).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(
+            button_frame, 
+            text="生成文档", 
+            command=on_generate,
+            width=15
+        ).pack(side=tk.RIGHT, padx=5)
+        
+        ttk.Button(
+            button_frame, 
+            text="取消", 
+            command=dialog.destroy,
+            width=15
+        ).pack(side=tk.RIGHT, padx=5)
         
         # 居中显示对话框
         dialog.update_idletasks()

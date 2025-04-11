@@ -4,16 +4,33 @@ from tkinter import ttk, scrolledtext, messagebox, IntVar
 import re
 from protocol_manager import ProtocolManager
 from ui_dialogs import ProtocolSelectionDialog, ProtocolEditor, ProtocolFieldDialog
+import json
+import os
 
 class HexParserTool:
     """16进制数据解析工具主界面"""
     
     def __init__(self, root):
         self.root = root
-        self.root.title("DataFormater  --1.0.0")
+        self.root.title("DataFormater  --2.1.3")
         
         # 初始化协议管理器
         self.protocol_manager = ProtocolManager()
+        
+        # 命令相关变量
+        self.command_name_var = tk.StringVar()
+        self.command_id_var = tk.StringVar()
+        self.command_desc_var = tk.StringVar()
+        self.command_var = tk.StringVar()
+        self.protocol_var = tk.StringVar()
+        
+        # 数据存储
+        self.raw_hex_data = ""
+        self.offset = 0
+        
+        # 当前选中的协议
+        self.current_protocol = None
+        self.current_protocol_key = None
         
         # 设置窗口风格
         self._setup_styles()
@@ -29,15 +46,17 @@ class HexParserTool:
         self._create_output_area()
         self._create_status_bar()
         
-        # 数据存储
-        self.raw_hex_data = ""
-        self.offset = 0
-        
         # 窗口调整事件绑定
         self.root.bind("<Configure>", self._on_window_resize)
         
         # 设置窗口居中
         self._center_window(900, 650)
+        
+        # 恢复上次的数据
+        self._restore_data()
+        
+        # 绑定窗口关闭事件
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
     
     def _setup_styles(self):
         """设置界面样式"""
@@ -76,15 +95,15 @@ class HexParserTool:
     
     def _create_control_area(self):
         """创建控制区域"""
-        self.control_frame = ttk.Frame(self.main_frame)
-        self.control_frame.pack(fill=tk.X, pady=5)
+        control_frame = ttk.Frame(self.main_frame)
+        control_frame.pack(fill=tk.X, pady=5)
         
         # 左侧按钮
-        self.button_frame = ttk.Frame(self.control_frame)
-        self.button_frame.pack(side=tk.LEFT)
+        button_frame = ttk.Frame(control_frame)
+        button_frame.pack(side=tk.LEFT)
         
         self.auto_format_btn = ttk.Button(
-            self.button_frame, 
+            button_frame, 
             text="自动格式化", 
             command=self._auto_format,
             width=15
@@ -93,7 +112,7 @@ class HexParserTool:
         
         # 添加"归入"按钮
         self.archive_btn = ttk.Button(
-            self.button_frame,
+            button_frame,
             text="归入协议",
             command=self._archive_protocol,
             width=15,
@@ -103,7 +122,7 @@ class HexParserTool:
         
         # 添加"识别协议"按钮
         self.identify_btn = ttk.Button(
-            self.button_frame,
+            button_frame,
             text="识别协议",
             command=self._identify_protocol,
             width=15,
@@ -113,7 +132,7 @@ class HexParserTool:
         
         # 添加"查看协议模板"按钮
         self.view_template_btn = ttk.Button(
-            self.button_frame,
+            button_frame,
             text="查看协议模板",
             command=self._open_protocol_template,
             width=15,
@@ -123,7 +142,7 @@ class HexParserTool:
         
         # 添加"定义字段"按钮
         self.define_field_btn = ttk.Button(
-            self.button_frame,
+            button_frame,
             text="定义字段",
             command=self._define_protocol_field,
             width=15,
@@ -131,36 +150,36 @@ class HexParserTool:
         )
         self.define_field_btn.pack(side=tk.LEFT, padx=(0, 10))
         
-        # 协议选择区域
-        self.protocol_frame = ttk.Frame(self.control_frame)
-        self.protocol_frame.pack(side=tk.LEFT, padx=(10, 0))
-        
         # 协议选择
-        ttk.Label(self.protocol_frame, text="选择协议:").pack(side=tk.LEFT)
+        protocol_frame = ttk.Frame(control_frame)
+        protocol_frame.pack(side=tk.LEFT, padx=5)
         
-        # 协议枚举变量
-        self.protocol_enum_var = tk.StringVar()
-        self.protocol_dropdown = ttk.Combobox(
-            self.protocol_frame, 
-            textvariable=self.protocol_enum_var,
-            width=25,
-            state=tk.DISABLED
-        )
-        self.protocol_dropdown.pack(side=tk.LEFT, padx=(5, 0))
+        ttk.Label(protocol_frame, text="协议:").pack(side=tk.LEFT)
+        self.protocol_dropdown = ttk.Combobox(protocol_frame, textvariable=self.protocol_var, width=30, state="readonly")
+        self.protocol_dropdown.pack(side=tk.LEFT, padx=5)
         self.protocol_dropdown.bind("<<ComboboxSelected>>", self._on_protocol_selected)
         
-        # 协议指令选择
-        ttk.Label(self.protocol_frame, text="指令:").pack(side=tk.LEFT, padx=(10, 0))
+        # 命令选择
+        command_frame = ttk.Frame(control_frame)
+        command_frame.pack(side=tk.LEFT, padx=5)
         
-        self.command_enum_var = tk.StringVar()
-        self.command_dropdown = ttk.Combobox(
-            self.protocol_frame,
-            textvariable=self.command_enum_var,
-            width=15,
-            state=tk.DISABLED
-        )
-        self.command_dropdown.pack(side=tk.LEFT, padx=(5, 0))
+        ttk.Label(command_frame, text="命令:").pack(side=tk.LEFT)
+        self.command_dropdown = ttk.Combobox(command_frame, textvariable=self.command_var, width=30, state="readonly")
+        self.command_dropdown.pack(side=tk.LEFT, padx=5)
         self.command_dropdown.bind("<<ComboboxSelected>>", self._on_command_selected)
+        
+        # 命令详情
+        detail_frame = ttk.Frame(control_frame)
+        detail_frame.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(detail_frame, text="名称:").pack(side=tk.LEFT)
+        ttk.Entry(detail_frame, textvariable=self.command_name_var, width=15, state="readonly").pack(side=tk.LEFT, padx=2)
+        
+        ttk.Label(detail_frame, text="ID:").pack(side=tk.LEFT)
+        ttk.Entry(detail_frame, textvariable=self.command_id_var, width=8, state="readonly").pack(side=tk.LEFT, padx=2)
+        
+        ttk.Label(detail_frame, text="描述:").pack(side=tk.LEFT)
+        ttk.Entry(detail_frame, textvariable=self.command_desc_var, width=30, state="readonly").pack(side=tk.LEFT, padx=2)
     
     def _create_output_area(self):
         """创建输出区域"""
@@ -250,6 +269,17 @@ class HexParserTool:
         self.clear_btn = ttk.Button(
             self.bottom_frame, text="清除内容", command=self._clear_all, width=15)
         self.clear_btn.pack(side=tk.LEFT)
+        
+        # 创建参数表格框架
+        parameter_label = ttk.Label(self.output_right, text="参数列表:")
+        parameter_label.pack(anchor=tk.W, pady=(5, 0))
+        
+        self.parameter_frame = ttk.Frame(self.output_right)
+        self.parameter_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 配置网格权重
+        for i in range(4):
+            self.parameter_frame.grid_columnconfigure(i, weight=1)
     
     def _create_status_bar(self):
         """创建状态栏"""
@@ -302,7 +332,7 @@ class HexParserTool:
         # 提取命令ID(第4位字节)
         command_id_hex = ""
         if len(hex_only) >= 8:
-            command_id_hex = hex_only[6:8]
+            command_id_hex = hex_only[6:8].upper()
             try:
                 command_id_dec = int(command_id_hex, 16)
                 self.status_var.set(f"命令ID: {command_id_dec} (0x{command_id_hex})")
@@ -310,19 +340,53 @@ class HexParserTool:
                 self.status_var.set(f"命令ID: 未知 (0x{command_id_hex})")
         
         # 尝试匹配协议
+        protocol = None
+        try:
+            print("=" * 50)
+            print(f"尝试匹配协议，数据: {hex_only[:20]}..., 命令ID: {command_id_hex}")
         protocol = self.protocol_manager.find_matching_protocol(hex_only)
+            print(f"匹配结果: {protocol.get('name', 'None') if protocol else 'None'}")
+        except Exception as e:
+            print(f"匹配协议过程中出错: {e}")
+            protocol = None
+            
         if protocol:
             # 显示匹配到的协议信息
-            self.status_var.set(f"自动匹配到协议: {protocol['name']}")
+            protocol_type = protocol.get('type', '')
+            protocol_name = protocol.get('name', '')
+            if protocol_type == 'command':
+                parent_protocol = protocol.get('protocol_name', '')
+                self.status_var.set(f"自动匹配到命令: {protocol_name} (协议: {parent_protocol})")
+            else:
+                self.status_var.set(f"自动匹配到协议: {protocol_name}")
+                
             # 解析协议数据
+            try:
             self._parse_and_display_protocol(protocol, hex_only)
+            except Exception as e:
+                print(f"解析协议数据出错: {e}")
+                self.status_var.set(f"解析协议数据出错: {str(e)[:50]}")
             
             # 自动选择匹配到的协议
             self._update_protocol_dropdown()
+            
+            if protocol_type == 'command':
+                # 找到并选择父协议
+                parent_name = protocol.get('protocol_name', '')
+                if parent_name:
             for i, value in enumerate(self.protocol_dropdown['values']):
-                if protocol['name'] == value:  # 协议下拉框只显示名称
+                        if parent_name in value:
                     self.protocol_dropdown.current(i)
-                    self.protocol_enum_var.set(value)
+                            self.protocol_var.set(value)
+                            self._on_protocol_selected(None)
+                            self.view_template_btn.config(state=tk.NORMAL)
+                            break
+            else:
+                # 直接选择协议
+                for i, value in enumerate(self.protocol_dropdown['values']):
+                    if protocol_name == value:
+                        self.protocol_dropdown.current(i)
+                        self.protocol_var.set(value)
                     self._on_protocol_selected(None)
                     self.view_template_btn.config(state=tk.NORMAL)
                     break
@@ -345,38 +409,132 @@ class HexParserTool:
         self.identify_btn.config(state=tk.NORMAL)
     
     def _archive_protocol(self):
-        """归档当前数据为命令"""
+        """归入协议"""
         if not self.raw_hex_data:
             messagebox.showinfo("提示", "请先格式化数据")
             return
         
-        if hasattr(self, 'current_protocol'):
-            # 如果已经选择了一个协议，直接创建命令归入该协议
-            ProtocolSelectionDialog(
-                self.root, self.raw_hex_data, self._save_protocol_callback, 
-                parent_protocol=self.current_protocol)
-        else:
-            # 如果没有选择协议，提示用户先选择协议
-            messagebox.showinfo("提示", "请先从下拉列表中选择一个协议，再归入命令")
+        # 检查是否已经选择了协议
+        selected_protocol = self.protocol_var.get()
+        if selected_protocol:
+            # 如果已经选择了协议，使用该协议作为父协议
+            protocols = self.protocol_manager.get_protocols()
+            parent_protocol = None
+            for protocol in protocols:
+                if protocol.get('type') == 'protocol' and protocol.get('name') == selected_protocol.split('(')[0].strip():
+                    parent_protocol = protocol
+                    break
             
-            # 确保协议下拉框已启用
-            if self.protocol_dropdown['state'] == 'disabled':
-                self._update_protocol_dropdown()
-                
-            # 如果没有可用的协议，提示用户创建协议
+            if parent_protocol:
+                # 打开协议选择对话框，传入父协议
+                dialog = ProtocolSelectionDialog(
+                    self.root,
+                    self.raw_hex_data,
+                    self._save_protocol_callback,
+                    parent_protocol=parent_protocol
+                )
+        else:
+                messagebox.showinfo("提示", "无法获取选中的协议信息")
+        else:
+            # 如果没有选择协议，打开普通的协议选择对话框
+            dialog = ProtocolSelectionDialog(
+                self.root,
+                self.raw_hex_data,
+                self._save_protocol_callback
+            )
+            
+            # 如果没有可选的协议，提示用户创建
             if not self.protocol_dropdown['values']:
-                if messagebox.askyesno("提示", "没有可用的协议，是否打开协议编辑器创建协议？"):
+                if messagebox.askyesno("提示", "没有可用的协议，是否打开协议编辑器创建新协议？"):
                     self._open_protocol_editor()
     
     def _save_protocol_callback(self, protocol_data):
-        """保存协议数据回调"""
-        success, message = self.protocol_manager.save_protocol(protocol_data)
-        if success:
-            self.status_var.set(message)
+        """保存协议的回调函数"""
+        try:
+            print("=" * 50)
+            print(f"接收到的protocol_data: {protocol_data}")
+            
+            # 获取原始hex数据，从中解析出原始ID
+            hex_data = protocol_data.get('hex_data', '')
+            original_id = ""
+            if len(hex_data) >= 8:
+                original_id = hex_data[6:8].upper()  # 第4个字节(索引6-7)是ID
+                print(f"从原始hex数据中提取的ID: {original_id}")
+            
+            # 确保protocol_data中的protocol_id_hex使用原始ID
+            if original_id and protocol_data.get('protocol_id_hex') != original_id:
+                print(f"纠正protocol_data中的ID: 从 {protocol_data.get('protocol_id_hex')} 修改为 {original_id}")
+                protocol_data['protocol_id_hex'] = original_id
+                protocol_data['protocol_id_dec'] = int(original_id, 16)
+            
+            # 保存协议
+            self.protocol_manager.save_protocol(protocol_data)
+            
+            # 更新当前协议
+            self.current_protocol = protocol_data
+            
             # 更新协议下拉框
             self._update_protocol_dropdown()
+            
+            # 如果保存的是命令，更新命令列表并生成单独的JSON文件
+            if protocol_data.get('type') == 'command':
+                self._update_command_combo()
+                
+                # 使用原始解析出的ID，不考虑用户输入
+                protocol_id = original_id
+                print(f"用于文件名的ID: {protocol_id}")
+                
+                # 从当前选择的协议中获取协议名称
+                selected_protocol = self.protocol_var.get()
+                if selected_protocol:
+                    protocol_name = selected_protocol.split('(')[0].strip()
+                    print(f"从下拉框获取的协议名称: {protocol_name}")
         else:
-            messagebox.showerror("错误", message)
+                    protocol_name = protocol_data.get('protocol_name', '')
+                    print(f"从protocol_data获取的协议名称: {protocol_name}")
+                
+                # 调试信息
+                print(f"保存命令: protocol_id={protocol_id}, protocol_name={protocol_name}")
+                print(f"当前选择的协议: {selected_protocol}")
+                
+                if protocol_id and protocol_name:
+                    # 创建协议文件夹路径
+                    protocol_dir = os.path.join('protocols', protocol_name)
+                    if not os.path.exists(protocol_dir):
+                        os.makedirs(protocol_dir)
+                        print(f"创建协议目录: {protocol_dir}")
+                    
+                    # 创建文件名 - 使用原始解析出的ID和命令名称
+                    command_name = protocol_data.get('name', '').replace(' ', '_')
+                    filename = f"command_{protocol_id}_{command_name}.json"
+                    print(f"将创建的文件名: {filename}")
+                    
+                    # 保存到文件
+                    filepath = os.path.join(protocol_dir, filename)
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        json.dump(protocol_data, f, ensure_ascii=False, indent=2)
+                    print(f"已保存文件到: {filepath}")
+                    print("=" * 50)
+                    messagebox.showinfo("成功", f"协议保存成功，并已生成文件：{protocol_dir}/{filename}")
+                else:
+                    error_msg = f"缺少必要信息："
+                    if not protocol_id:
+                        error_msg += " 协议ID"
+                    if not protocol_name:
+                        error_msg += " 协议名称"
+                    print(error_msg)
+                    print("=" * 50)
+                    messagebox.showerror("错误", error_msg)
+            else:
+                # 协议类型是protocol，保存成功
+                print("保存的是协议类型，不生成单独的JSON文件")
+                print("=" * 50)
+                messagebox.showinfo("成功", "协议保存成功")
+        except Exception as e:
+            error_msg = f"保存协议失败: {str(e)}"
+            print(error_msg)
+            print("=" * 50)
+            messagebox.showerror("错误", error_msg)
     
     def _format_by_columns(self, hex_data):
         """按列格式化16进制数据"""
@@ -841,12 +999,12 @@ class HexParserTool:
         if not protocols:
             self.protocol_dropdown['values'] = []
             self.protocol_dropdown['state'] = 'disabled'
-            self.protocol_enum_var.set('')
+            self.protocol_var.set('')
             
             # 清空指令下拉菜单
             self.command_dropdown['values'] = []
             self.command_dropdown['state'] = 'disabled'
-            self.command_enum_var.set('')
+            self.command_var.set('')
             return
             
         # 过滤掉命令，只保留协议
@@ -863,88 +1021,183 @@ class HexParserTool:
             
             # 如果只有一个协议，自动选择
             if len(protocol_list) == 1:
-                self.protocol_enum_var.set(protocol_list[0])
+                self.protocol_var.set(protocol_list[0])
                 self._on_protocol_selected(None)
         else:
             self.protocol_dropdown['values'] = []
             self.protocol_dropdown['state'] = 'disabled'
-            self.protocol_enum_var.set('')
+            self.protocol_var.set('')
             
             # 清空指令下拉菜单
             self.command_dropdown['values'] = []
             self.command_dropdown['state'] = 'disabled'
-            self.command_enum_var.set('')
+            self.command_var.set('')
     
     def _on_protocol_selected(self, event):
-        """当选择协议时更新指令下拉菜单"""
-        selected_protocol = self.protocol_enum_var.get()
-        
-        # 协议下拉框现在只显示协议名称，直接通过协议名查找
-        found_protocol = None
-        protocol_key = None
-        
-        for key, protocol in self.protocol_manager.protocols.items():
-            if protocol.get('type', '') == 'protocol' and protocol.get('name', '') == selected_protocol:
-                found_protocol = protocol
-                protocol_key = key
-                break
-        
-        if found_protocol:
-            # 设置当前选中的协议
-            self.current_protocol = found_protocol
-            self.current_protocol_key = protocol_key
-            self.view_template_btn.config(state=tk.NORMAL)
-            
-            # 获取该协议的所有指令
-            commands = self.protocol_manager.get_protocol_commands(found_protocol.get('name', ''))
-            
-            if commands:
-                # 更新指令下拉菜单
-                command_values = []
-                self.command_data = {}  # 存储命令数据，用于显示
-                
-                for cmd_id, cmd_data in commands.items():
-                    cmd_name = cmd_data.get('name', '')
-                    cmd_id_hex = cmd_data.get('protocol_id_hex', '')
-                    cmd_id_dec = cmd_data.get('protocol_id_dec', '')
-                    
-                    # 显示名称包含命令名和ID
-                    display_name = f"{cmd_name} [0x{cmd_id_hex}({cmd_id_dec})]"
-                    command_values.append(display_name)
-                    
-                    # 保存命令数据，以显示名为键
-                    self.command_data[display_name] = cmd_data
-                
-                # 排序命令
-                command_values.sort()
-                
-                # 更新下拉菜单
-                self.command_dropdown['values'] = command_values
-                # 确保设置为只读状态
-                self.command_dropdown['state'] = 'readonly'
-                
-                # 如果只有一个指令，自动选择
-                if len(command_values) == 1:
-                    self.command_enum_var.set(command_values[0])
-                    self._on_command_selected(None)
-            else:
-                self.command_dropdown['values'] = []
-                self.command_dropdown['state'] = 'disabled'
-                self.command_enum_var.set('')
-    
-    def _on_command_selected(self, event):
-        """当选择指令时更新解析结果"""
-        selected_command = self.command_enum_var.get()
-        
-        if not hasattr(self, 'command_data') or not selected_command or selected_command not in self.command_data:
+        """当选择协议时更新命令下拉框"""
+        selected_protocol = self.protocol_var.get()
+        if not selected_protocol:
             return
             
-        # 获取命令数据
-        command_data = self.command_data[selected_command]
+        # 从协议名称中提取协议ID
+        protocol_id = selected_protocol.split('(')[-1].strip(')')
+        if '0x' in protocol_id:
+            protocol_id = protocol_id[2:]  # 移除0x前缀
+            
+        # 获取该协议下的所有命令
+        commands = self.protocol_manager.get_protocol_commands(selected_protocol.split('(')[0].strip())
         
-        if command_data and self.raw_hex_data:
-            # 解析并显示数据
-            self._parse_and_display_protocol(command_data, self.raw_hex_data)
+        # 清空并更新命令下拉框
+        self.command_dropdown['values'] = []
+        self.command_var.set('')
+            
+            if commands:
+            # 从原始数据中提取当前报文的命令ID
+            current_command_id = ""
+            if self.raw_hex_data and len(self.raw_hex_data) >= 8:
+                current_command_id = self.raw_hex_data[6:8].upper()  # 第4个字节(索引6-7)是ID
+                print(f"当前报文的命令ID: {current_command_id}")
+            
+            # 将命令按名称排序，只保留与当前报文ID匹配的命令
+                command_values = []
+            matching_commands = []
+            
+            for command in commands:
+                if isinstance(command, dict):
+                    command_id = command.get('protocol_id_hex', '').upper()
+                    command_name = command.get('name', '')
+                    
+                    # 如果有当前报文ID，只显示匹配的命令
+                    # 如果没有当前报文ID，显示所有命令
+                    if (not current_command_id) or (command_id == current_command_id):
+                        if command_id and command_name:
+                            display_name = f"{command_name} (0x{command_id})"
+                    command_values.append(display_name)
+                            matching_commands.append(command)
+                    
+            # 按名称排序
+                command_values.sort()
+                self.command_dropdown['values'] = command_values
+            
+            # 保存匹配的命令数据，方便后续使用
+            self.matching_commands = matching_commands
+            
+            print(f"找到匹配当前报文ID的命令数量: {len(command_values)}")
+            
+            # 如果有命令，自动选择第一个
+            if command_values:
+                self.command_var.set(command_values[0])
+                self._on_command_selected(None)  # 触发命令选择事件
+    
+    def _on_command_selected(self, event):
+        """当选择命令时更新命令详情并应用模板"""
+        selected_command = self.command_var.get()
+        if not selected_command:
+            return
+            
+        # 从显示名称中提取命令名称和ID
+        try:
+            # 格式为 "命令名称 (0x命令ID)"
+            command_name = selected_command.split(' (0x')[0]
+            command_id = selected_command.split(' (0x')[1].strip(')')
+        except IndexError:
+            return
+            
+        # 查找匹配的命令
+        command_data = None
+        
+        # 如果已经有保存的匹配命令列表，从中查找
+        if hasattr(self, 'matching_commands') and self.matching_commands:
+            for command in self.matching_commands:
+                if command.get('name') == command_name and command.get('protocol_id_hex', '').upper() == command_id.upper():
+                    command_data = command
+                    break
+        
+        # 如果没有找到，尝试从所有命令中查找
+        if not command_data:
+            # 获取选中的协议
+            selected_protocol = self.protocol_var.get()
+            if not selected_protocol:
+                return
+                
+            # 获取该协议的所有命令
+            commands = self.protocol_manager.get_protocol_commands(selected_protocol.split('(')[0].strip())
+            
+            # 查找匹配的命令
+            for command in commands:
+                if isinstance(command, dict):
+                    if command.get('name') == command_name and command.get('protocol_id_hex', '').upper() == command_id.upper():
+                        command_data = command
+                        break
+        
+        if not command_data:
+            print(f"未找到匹配的命令: {command_name} (0x{command_id})")
+            return
+            
+        print(f"应用命令模板: {command_name} (0x{command_id})")
+        
+        # 更新命令详情
+        self.command_name_var.set(command_data.get('name', ''))
+        self.command_id_var.set(command_data.get('protocol_id_hex', ''))
+        self.command_desc_var.set(command_data.get('description', ''))
+        
+        # 记录当前选中的命令，用于后续操作
+        self.current_command = command_data
+        
+        # 初始化或更新命令数据字典
+        if not hasattr(self, 'command_data'):
+            self.command_data = {}
+        self.command_data[selected_command] = command_data
+        
+        # 启用定义字段按钮
+        self.define_field_btn.config(state=tk.NORMAL)
+        
+        # 更新参数表格
+        self._update_parameter_table(command_data.get('fields', []))
+        
+        # 应用命令模板解析当前数据
+        if self.raw_hex_data and 'fields' in command_data:
+            # 使用命令模板解析当前数据
+            parsed_data = self.protocol_manager.parse_protocol_data(self.raw_hex_data, command_data)
+            if parsed_data:
+                # 更新解析结果显示
+                self.parse_text.config(state=tk.NORMAL)
+                self.parse_text.delete("1.0", tk.END)
+                
+                # 添加命令标题
+                self.parse_text.insert(tk.END, f"命令: {command_name} (0x{command_id})\n", "title")
+                self.parse_text.insert(tk.END, f"描述: {command_data.get('description', '')}\n\n", "normal")
+                
+                # 添加字段解析结果
+                self.parse_text.insert(tk.END, "字段解析结果:\n", "subtitle")
+                for field_result in parsed_data.get('fields', []):
+                    field_name = field_result.get('name', '')
+                    field_value = field_result.get('value', '')
+                    field_hex = field_result.get('hex_value', '')
+                    field_desc = field_result.get('description', '')
+                    
+                    # 格式化显示
+                    if field_hex:
+                        self.parse_text.insert(tk.END, f"{field_name}: {field_value} (0x{field_hex})\n", "field")
+                    else:
+                        self.parse_text.insert(tk.END, f"{field_name}: {field_value}\n", "field")
+                    
+                    if field_desc:
+                        self.parse_text.insert(tk.END, f"  描述: {field_desc}\n", "normal")
+                
+                self.parse_text.config(state=tk.DISABLED)
+                self.status_var.set(f"已应用命令模板: {command_name}")
+            else:
+                self.parse_text.config(state=tk.NORMAL)
+                self.parse_text.delete("1.0", tk.END)
+                self.parse_text.insert(tk.END, f"无法使用命令模板 '{command_name}' 解析当前数据\n", "error")
+                self.parse_text.config(state=tk.DISABLED)
+                self.status_var.set(f"解析失败: {command_name}")
+        else:
+            if not self.raw_hex_data:
+                self.status_var.set("请先格式化数据再应用命令模板")
+            elif 'fields' not in command_data or not command_data['fields']:
+                self.status_var.set(f"命令 {command_name} 没有定义字段")
 
     def _parse_and_display_protocol(self, protocol, hex_data):
         """解析并显示协议数据"""
@@ -1042,14 +1295,42 @@ class HexParserTool:
             messagebox.showinfo("提示", "请先格式化数据")
             return
             
+        print("=" * 50)
+        print("执行识别协议操作")
+        print(f"待识别的数据: {self.raw_hex_data[:20]}...")
+        
+        # 尝试提取命令ID
+        command_id = ""
+        if len(self.raw_hex_data) >= 8:
+            command_id = self.raw_hex_data[6:8].upper()
+            print(f"提取的命令ID: {command_id}")
+            
         # 尝试自动匹配协议或命令
+        try:
         matched = self.protocol_manager.find_matching_protocol(self.raw_hex_data)
+            if matched:
+                print(f"匹配成功: {matched.get('name', '')}, 类型: {matched.get('type', '')}")
+            else:
+                print("没有找到匹配的协议或命令")
+        except Exception as e:
+            print(f"匹配过程中出错: {e}")
+            matched = None
+        
         if not matched:
-            messagebox.showinfo("提示", "未找到匹配的协议或命令")
+            # 未找到匹配的协议，询问用户是否创建新协议
+            print("未找到匹配的协议，将询问用户是否创建新协议")
+            if messagebox.askyesno("提示", "未找到匹配的协议或命令，是否创建新协议？"):
+                # 打开协议选择对话框创建新协议
+                dialog = ProtocolSelectionDialog(
+                    self.root,
+                    self.raw_hex_data,
+                    self._save_protocol_callback
+                )
             return
             
         # 判断返回的是协议还是命令
         is_command = matched.get('type') == 'command'
+        print(f"匹配到的是{'命令' if is_command else '协议'}")
         
         if is_command:
             # 返回的是命令，需要找到其所属协议
@@ -1057,25 +1338,35 @@ class HexParserTool:
             protocol_key = None
             protocol = None
             
+            print(f"命令所属协议: {protocol_name}")
+            
             # 查找协议
             for key, p in self.protocol_manager.protocols.items():
                 if p.get('type') == 'protocol' and p.get('name') == protocol_name:
                     protocol = p
                     protocol_key = key
+                    print(f"找到对应的协议: {key}")
                     break
                     
             if not protocol:
+                print(f"未找到命令所属的协议: {protocol_name}")
                 messagebox.showinfo("提示", f"未找到命令所属的协议: {protocol_name}")
                 return
                 
             # 自动选择协议
             self._update_protocol_dropdown()
+            selected_protocol = False
             for i, value in enumerate(self.protocol_dropdown['values']):
                 if protocol['name'] == value:
                     self.protocol_dropdown.current(i)
-                    self.protocol_enum_var.set(value)
+                    self.protocol_var.set(value)
                     self._on_protocol_selected(None)
+                    selected_protocol = True
+                    print(f"已选择协议: {value}")
                     break
+            
+            if not selected_protocol:
+                print("在下拉框中未找到匹配的协议")
                     
             # 自动选择命令
             command_id_hex = matched.get('protocol_id_hex', '')
@@ -1083,19 +1374,31 @@ class HexParserTool:
             command_name = matched.get('name', '')
             
             # 显示名称包含命令名和ID
-            display_name = f"{command_name} [0x{command_id_hex}({command_id_dec})]"
+            display_name = f"{command_name} (0x{command_id_hex})"
             
             # 在命令下拉框中查找并选择
-            if hasattr(self, 'command_data'):
+            if hasattr(self, 'matching_commands'):
+                found_command = False
                 for i, value in enumerate(self.command_dropdown['values']):
-                    if display_name == value:
+                    if command_name in value and command_id_hex in value:
                         self.command_dropdown.current(i)
-                        self.command_enum_var.set(value)
+                        self.command_var.set(value)
                         self._on_command_selected(None)
+                        found_command = True
+                        print(f"已选择命令: {value}")
                         break
+                
+                if not found_command:
+                    print(f"在下拉框中未找到匹配的命令: {display_name}")
+                    print(f"可用的命令: {self.command_dropdown['values']}")
             
             # 解析并显示命令数据
+            try:
             self._parse_and_display_protocol(matched, self.raw_hex_data)
+            except Exception as e:
+                print(f"解析命令数据出错: {e}")
+                messagebox.showerror("错误", f"解析命令数据出错: {str(e)}")
+                
             self.status_var.set(f"已识别命令: {command_name} (ID: 0x{command_id_hex})")
             
             # 设置当前协议
@@ -1111,24 +1414,38 @@ class HexParserTool:
             protocol = matched
             protocol_key = None
             
+            print(f"匹配到的协议名称: {protocol.get('name', '')}")
+            
             # 查找协议的键
             for key, p in self.protocol_manager.protocols.items():
                 if p.get('type') == 'protocol' and p.get('name') == protocol.get('name'):
                     protocol_key = key
+                    print(f"找到协议键: {key}")
                     break
             
             if protocol_key:
                 # 自动选择匹配到的协议
                 self._update_protocol_dropdown()
+                selected_protocol = False
                 for i, value in enumerate(self.protocol_dropdown['values']):
                     if protocol['name'] == value:
                         self.protocol_dropdown.current(i)
-                        self.protocol_enum_var.set(value)
+                        self.protocol_var.set(value)
                         self._on_protocol_selected(None)
+                        selected_protocol = True
+                        print(f"已选择协议: {value}")
                         break
                 
+                if not selected_protocol:
+                    print("在下拉框中未找到匹配的协议")
+                
                 # 解析并显示协议数据
+                try:
                 self._parse_and_display_protocol(protocol, self.raw_hex_data)
+                except Exception as e:
+                    print(f"解析协议数据出错: {e}")
+                    messagebox.showerror("错误", f"解析协议数据出错: {str(e)}")
+                    
                 self.status_var.set(f"已识别协议: {protocol['name']}")
                 
                 # 设置当前协议
@@ -1141,18 +1458,25 @@ class HexParserTool:
                 
                 # 如果当前数据包含命令ID，检查是否需要创建新命令
                 if len(self.raw_hex_data) >= 8:
-                    command_id_hex = self.raw_hex_data[6:8]
+                    command_id_hex = self.raw_hex_data[6:8].upper()
                     
                     # 检查命令ID是否已存在
                     command_exists = False
-                    for cmd in self.protocol_manager.get_protocol_commands(protocol.get('name', '')).values():
-                        if cmd.get('protocol_id_hex') == command_id_hex:
+                    for cmd in self.protocol_manager.get_protocol_commands(protocol.get('name', '')):
+                        if isinstance(cmd, dict) and cmd.get('protocol_id_hex', '').upper() == command_id_hex:
                             command_exists = True
                             break
                     
                     if not command_exists:
                         # 询问是否创建新命令
                         if messagebox.askyesno("新命令", f"是否为协议 '{protocol['name']}' 创建新命令 (ID: 0x{command_id_hex})?"):
+                            # 启动归档对话框创建新命令
+                            ProtocolSelectionDialog(
+                                self.root, self.raw_hex_data, self._save_protocol_callback,
+                                parent_protocol=protocol)
+                    else:
+                        # 如果命令ID已存在，询问是否创建不同名称的命令
+                        if messagebox.askyesno("创建新命令", f"命令ID 0x{command_id_hex} 已存在，是否创建不同名称的命令？"):
                             # 启动归档对话框创建新命令
                             ProtocolSelectionDialog(
                                 self.root, self.raw_hex_data, self._save_protocol_callback,
@@ -1251,17 +1575,17 @@ class HexParserTool:
             return
             
         # 检查是否选择了命令
-        selected_command = self.command_enum_var.get()
+        selected_command = self.command_var.get()
         if not selected_command:
             messagebox.showinfo("提示", "请先选择一个命令，字段应该定义在命令中而不是协议中")
             return
             
         # 获取选中的命令数据
-        if not hasattr(self, 'command_data') or selected_command not in self.command_data:
-            messagebox.showinfo("提示", "无法获取命令数据")
+        if not hasattr(self, 'current_command'):
+            messagebox.showinfo("提示", "无法获取命令数据，请先选择一个命令")
             return
             
-        command_data = self.command_data[selected_command]
+        command_data = self.current_command
         
         # 获取选中的字节范围
         selection = self._get_selected_byte_range()
@@ -1278,7 +1602,7 @@ class HexParserTool:
             return {'success': False, 'message': '无效的操作'}
         
         # 检查是否选择了命令
-        selected_command = self.command_enum_var.get()
+        selected_command = self.command_var.get()
         if not selected_command:
             return {'success': False, 'message': '未选择命令，字段应定义在命令中'}
             
@@ -1400,7 +1724,7 @@ class HexParserTool:
         if not self.protocol_manager.protocols:
             messagebox.showinfo("提示", "没有可用的协议，请先添加协议")
             return
-        
+            
         # 创建协议选择对话框
         dialog = tk.Toplevel(self.root)
         dialog.title("生成协议文档")
@@ -1451,8 +1775,8 @@ class HexParserTool:
         # 处理生成文档
         def on_generate():
             try:
-                fmt = selected_format.get()
-                output_format = "docx" if "Word" in fmt else "xlsx"
+            fmt = selected_format.get()
+            output_format = "docx" if "Word" in fmt else "xlsx"
                 
                 protocol_name = selected_protocol.get()
                 protocol_key = None
@@ -1465,14 +1789,14 @@ class HexParserTool:
                             break
                 
                 # 生成文档
-                success, message = self.protocol_manager.generate_protocol_doc(protocol_key, output_format)
+            success, message = self.protocol_manager.generate_protocol_doc(protocol_key, output_format)
                 
                 dialog.destroy()
-                
-                if success:
-                    messagebox.showinfo("成功", message)
-                else:
-                    messagebox.showerror("错误", message)
+            
+            if success:
+                messagebox.showinfo("成功", message)
+            else:
+                messagebox.showerror("错误", message)
             except Exception as e:
                 dialog.destroy()
                 messagebox.showerror("错误", f"生成文档时出错: {str(e)}")
@@ -1502,6 +1826,186 @@ class HexParserTool:
         x = (dialog.winfo_screenwidth() - width) // 2
         y = (dialog.winfo_screenheight() - height) // 2
         dialog.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _save_data(self):
+        """保存当前数据到文件"""
+        try:
+            data = {
+                'input_text': self.input_text.get("1.0", tk.END),
+                'output_text': self.output_text.get("1.0", tk.END),
+                'parse_text': self.parse_text.get("1.0", tk.END),
+                'raw_hex_data': self.raw_hex_data,
+                'offset': self.offset
+            }
+            
+            with open('last_session.json', 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"保存数据失败: {e}")
+            
+    def _restore_data(self):
+        """从文件恢复上次的数据"""
+        try:
+            if os.path.exists('last_session.json'):
+                with open('last_session.json', 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    
+                self.input_text.delete("1.0", tk.END)
+                self.input_text.insert("1.0", data.get('input_text', ''))
+                
+                self.output_text.config(state=tk.NORMAL)
+                self.output_text.delete("1.0", tk.END)
+                self.output_text.insert("1.0", data.get('output_text', ''))
+                self.output_text.config(state=tk.DISABLED)
+                
+                self.parse_text.config(state=tk.NORMAL)
+                self.parse_text.delete("1.0", tk.END)
+                self.parse_text.insert("1.0", data.get('parse_text', ''))
+                self.parse_text.config(state=tk.DISABLED)
+                
+                self.raw_hex_data = data.get('raw_hex_data', '')
+                self.offset = data.get('offset', 0)
+        except Exception as e:
+            print(f"恢复数据失败: {e}")
+            
+    def _on_closing(self):
+        """窗口关闭事件处理"""
+        self._save_data()
+        self.root.destroy()
+
+    def _update_parameter_table(self, fields):
+        """更新字段表格显示"""
+        # 清除现有表格
+        for widget in self.parameter_frame.winfo_children():
+            widget.destroy()
+            
+        if not fields:
+            # 如果没有字段，显示一个提示信息
+            ttk.Label(self.parameter_frame, text="暂无字段定义").grid(row=0, column=0, sticky="nsew")
+            return
+            
+        # 创建表格标题
+        headers = ["名称", "类型", "位置", "长度", "描述"]
+        for col, header in enumerate(headers):
+            label = ttk.Label(self.parameter_frame, text=header, relief="ridge")
+            label.grid(row=0, column=col, sticky="nsew")
+            # 表头加粗
+            label.configure(font=('TkDefaultFont', 9, 'bold'))
+            
+        # 添加字段行
+        for row, field in enumerate(fields, start=1):
+            # 获取字段信息
+            field_name = field.get('name', '')
+            field_type = field.get('type', '')
+            start_pos = field.get('start_pos', 0)
+            end_pos = field.get('end_pos', 0)
+            length = end_pos - start_pos + 1
+            description = field.get('description', '')
+            
+            # 创建字段信息单元格
+            ttk.Label(self.parameter_frame, text=field_name, relief="ridge").grid(row=row, column=0, sticky="nsew")
+            ttk.Label(self.parameter_frame, text=field_type, relief="ridge").grid(row=row, column=1, sticky="nsew")
+            ttk.Label(self.parameter_frame, text=f"{start_pos}-{end_pos}", relief="ridge").grid(row=row, column=2, sticky="nsew")
+            ttk.Label(self.parameter_frame, text=str(length), relief="ridge").grid(row=row, column=3, sticky="nsew")
+            ttk.Label(self.parameter_frame, text=description, relief="ridge").grid(row=row, column=4, sticky="nsew")
+            
+        # 配置网格权重
+        for i in range(len(headers)):
+            self.parameter_frame.grid_columnconfigure(i, weight=1)
+
+    def _update_command_combo(self):
+        """更新命令下拉框"""
+        # 获取当前选择的协议
+        selected_protocol = self.protocol_var.get()
+        if not selected_protocol:
+            return
+            
+        protocol_name = selected_protocol.split('(')[0].strip()
+        print(f"更新协议 '{protocol_name}' 的命令下拉框")
+            
+        # 获取该协议下的所有命令
+        commands = self.protocol_manager.get_protocol_commands(protocol_name)
+        
+        # 清空并更新命令下拉框
+        self.command_dropdown['values'] = []
+        self.command_var.set('')
+        
+        if commands:
+            # 从原始数据中提取当前报文的命令ID
+            current_command_id = ""
+            if self.raw_hex_data and len(self.raw_hex_data) >= 8:
+                current_command_id = self.raw_hex_data[6:8].upper()  # 第4个字节(索引6-7)是ID
+                print(f"当前报文的命令ID: {current_command_id}")
+            
+            # 收集所有命令
+            command_values = []
+            matching_commands = []
+            
+            # 先按ID分组命令，便于处理同ID命令
+            commands_by_id = {}
+            for command in commands:
+                if isinstance(command, dict):
+                    command_id = command.get('protocol_id_hex', '').upper()
+                    if command_id not in commands_by_id:
+                        commands_by_id[command_id] = []
+                    commands_by_id[command_id].append(command)
+            
+            print(f"命令按ID分组后：{list(commands_by_id.keys())}")
+            
+            # 处理每组命令
+            for command_id, cmd_list in commands_by_id.items():
+                # 对于同ID的多个命令，添加序号区分
+                if len(cmd_list) > 1:
+                    print(f"ID {command_id} 有 {len(cmd_list)} 个不同命令")
+                    for i, command in enumerate(cmd_list):
+                        command_name = command.get('name', '')
+                        if command_id and command_name:
+                            # 添加序号以区分
+                            display_name = f"{command_name} (0x{command_id}) #{i+1}"
+                            command_values.append(display_name)
+                            matching_commands.append(command)
+                            print(f"添加命令: {display_name}")
+                else:
+                    # 单个命令正常显示
+                    command = cmd_list[0]
+                    command_name = command.get('name', '')
+                    if command_id and command_name:
+                        display_name = f"{command_name} (0x{command_id})"
+                        command_values.append(display_name)
+                        matching_commands.append(command)
+                        print(f"添加命令: {display_name}")
+            
+            # 按名称排序
+            display_names_with_index = [(i, name) for i, name in enumerate(command_values)]
+            sorted_display_names = sorted(display_names_with_index, key=lambda x: x[1])
+            
+            sorted_command_values = [name for _, name in sorted_display_names]
+            sorted_matching_commands = [matching_commands[i] for i, _ in sorted_display_names]
+            
+            # 更新下拉框和命令列表
+            self.command_dropdown['values'] = sorted_command_values
+            self.matching_commands = sorted_matching_commands
+            
+            print(f"命令下拉框已更新，共 {len(sorted_command_values)} 个命令")
+            
+            # 如果有当前报文ID，尝试选择匹配的命令
+            selected_cmd_index = -1
+            if current_command_id:
+                for i, command in enumerate(sorted_matching_commands):
+                    if command.get('protocol_id_hex', '').upper() == current_command_id:
+                        selected_cmd_index = i
+                        break
+            
+            # 如果找到匹配的命令或有命令，自动选择
+            if selected_cmd_index >= 0:
+                self.command_var.set(sorted_command_values[selected_cmd_index])
+                print(f"已选择匹配当前报文ID的命令: {sorted_command_values[selected_cmd_index]}")
+            elif sorted_command_values:
+                self.command_var.set(sorted_command_values[0])
+                print(f"未找到匹配当前报文ID的命令，选择第一个: {sorted_command_values[0]}")
+            
+            # 触发命令选择事件
+            self._on_command_selected(None)
 
 if __name__ == "__main__":
     root = tk.Tk()

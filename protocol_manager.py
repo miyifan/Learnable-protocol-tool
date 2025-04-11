@@ -64,7 +64,7 @@ class ProtocolManager:
                                 self.protocols[f"{group}/{command_id}"] = command
                         except Exception as e:
                             print(f"加载命令文件 {file_path} 失败: {e}")
-                continue
+                    continue
                 
                 group = file_path.parent.name
                 command_id = file_path.stem
@@ -87,23 +87,13 @@ class ProtocolManager:
             print(f"加载完成，协议数量: {len(self.protocols)}")
             print(f"command_numbers: {len(self.protocol_commands)}")
             return True, "协议和命令加载成功"
-                except Exception as e:
+        except Exception as e:
             return False, f"加载协议和命令失败: {str(e)}"
     
     def save_protocol(self, protocol_data):
         """保存协议数据到文件"""
         # 确保协议数据包含十进制和十六进制形式
-        # 处理新的键名：hex_id和dec_id
-        if "hex_id" in protocol_data:
-            protocol_data["protocol_id_hex"] = protocol_data["hex_id"]
-            try:
-                if "dec_id" in protocol_data:
-                    protocol_data["protocol_id_dec"] = str(protocol_data["dec_id"])
-                else:
-                    protocol_data["protocol_id_dec"] = str(int(protocol_data["hex_id"], 16))
-            except ValueError:
-                protocol_data["protocol_id_dec"] = "未知"
-        elif "protocol_id_hex" not in protocol_data and "protocol_id" in protocol_data:
+        if "protocol_id_hex" not in protocol_data and "protocol_id" in protocol_data:
             protocol_data["protocol_id_hex"] = protocol_data["protocol_id"]
             try:
                 protocol_data["protocol_id_dec"] = str(int(protocol_data["protocol_id"], 16))
@@ -212,6 +202,62 @@ class ProtocolManager:
         print(f"尝试删除协议，键值: {protocol_key}")
         print(f"当前协议键列表: {list(self.protocols.keys())}")
         
+        # 检查是否是命令类型的键（包含三个部分：组/ID/名称）
+        parts = protocol_key.split('/')
+        is_command_with_name = len(parts) == 3
+        
+        if is_command_with_name:
+            # 新格式: group/id/name
+            group = parts[0]
+            command_id = parts[1]
+            command_name = parts[2]
+            print(f"删除特定命令: 组={group}, ID={command_id}, 名称={command_name}")
+            
+            # 查找并删除特定命令
+            found = False
+            for protocol_name, commands in self.protocol_commands.items():
+                if command_id in commands:
+                    command_list = commands[command_id]
+                    
+                    if isinstance(command_list, list):
+                        # 查找并仅删除特定名称的命令
+                        for i, cmd in enumerate(command_list):
+                            if isinstance(cmd, dict) and cmd.get('name') == command_name:
+                                # 如果列表中只有一个命令，删除整个命令条目
+                                if len(command_list) == 1:
+                                    del commands[command_id]
+                                    print(f"命令列表中只有一个命令，删除整个命令条目: {command_id}")
+                                else:
+                                    # 否则只删除特定名称的命令
+                                    del command_list[i]
+                                    print(f"从命令列表中删除特定命令: {command_name}")
+                                
+                                found = True
+                                break
+                    elif isinstance(command_list, dict) and command_list.get('name') == command_name:
+                        # 如果命令是字典并且名称匹配，删除整个条目
+                        del commands[command_id]
+                        print(f"删除命令字典: {command_id}")
+                        found = True
+                
+                if found:
+                    # 删除对应的文件
+                    try:
+                        file_path = self.data_dir / group / f"{command_id}.json"
+                        if file_path.exists():
+                            file_path.unlink()
+                            print(f"删除命令文件: {file_path}")
+                    except Exception as e:
+                        print(f"删除命令文件失败: {e}")
+                    
+                    # 保存命令字典
+                    self._save_protocol_commands()
+                    return True, f"命令 '{command_name}' 已删除"
+            
+            # 未找到匹配的命令
+            return False, f"未找到命令: {command_name} (ID: {command_id})"
+        
+        # 以下是原始删除逻辑
         if protocol_key not in self.protocols:
             print(f"检查是否是旧格式命令文件: {protocol_key}")
             # 检查是否是旧格式的命令文件名导致的问题
@@ -299,7 +345,7 @@ class ProtocolManager:
                 else:
                     # 尝试查找匹配的命令文件
                     for file_path in (self.data_dir / group).glob(f"command_{protocol_id}_*.json"):
-                    file_path.unlink()
+                        file_path.unlink()
                         command_file_found = True
                         print(f"已删除命令文件: {file_path}")
                         break
@@ -337,7 +383,35 @@ class ProtocolManager:
                 return protocol
             elif isinstance(protocol, list) and protocol:
                 # 如果是命令列表，返回第一个命令
-                return protocol[0]
+                if isinstance(protocol[0], dict):
+                    return protocol[0]
+                else:
+                    print(f"警告: 列表中的第一个元素不是字典: {type(protocol[0])}")
+                    return None
+            
+        # 检查是否是新格式的命令键（包含三个部分：组/ID/名称）
+        parts = protocol_key.split('/')
+        if len(parts) == 3:
+            group, command_id, command_name = parts
+            print(f"处理新格式命令键: 组={group}, ID={command_id}, 名称={command_name}")
+            
+            # 在命令字典中查找特定名称的命令
+            for protocol_name, commands in self.protocol_commands.items():
+                if command_id in commands:
+                    command_list = commands[command_id]
+                    
+                    if isinstance(command_list, list):
+                        # 在列表中查找特定名称的命令
+                        for cmd in command_list:
+                            if isinstance(cmd, dict) and cmd.get('name') == command_name:
+                                print(f"在命令列表中找到特定名称的命令: {command_name}")
+                                return cmd
+                    elif isinstance(command_list, dict) and command_list.get('name') == command_name:
+                        print(f"找到匹配的命令字典: {command_name}")
+                        return command_list
+            
+            print(f"未找到特定名称的命令: {command_name}")
+            return None
             
         # 如果键包含斜杠，尝试分离组名和ID
         if '/' in protocol_key:
@@ -351,15 +425,25 @@ class ProtocolManager:
                         print(f"在命令字典中找到匹配: {protocol_name}/{id_part}")
                         # 返回该命令ID下的第一个命令
                         if isinstance(commands[id_part], list) and commands[id_part]:
-                            return commands[id_part][0]
+                            if isinstance(commands[id_part][0], dict):
+                                return commands[id_part][0]
+                            else:
+                                print(f"警告: 命令列表中的第一个元素不是字典: {type(commands[id_part][0])}")
+                        elif isinstance(commands[id_part], dict):
+                            return commands[id_part]
         
         # 直接在命令字典中查找ID
         for protocol_name, commands in self.protocol_commands.items():
             if protocol_key in commands:
                 print(f"在命令字典中找到键: {protocol_key}")
-                # 返回该命令ID下的第一个命令
+                # 返回该命令ID下的第一个命令或对象
                 if isinstance(commands[protocol_key], list) and commands[protocol_key]:
-                    return commands[protocol_key][0]
+                    if isinstance(commands[protocol_key][0], dict):
+                        return commands[protocol_key][0]
+                    else:
+                        print(f"警告: 命令列表中的第一个元素不是字典: {type(commands[protocol_key][0])}")
+                elif isinstance(commands[protocol_key], dict):
+                    return commands[protocol_key]
         
         # 如果找不到，循环打印所有协议命令键值，帮助调试
         print("未找到协议，打印当前所有命令情况:")
@@ -371,6 +455,10 @@ class ProtocolManager:
                     for cmd in cmd_list:
                         if isinstance(cmd, dict):
                             print(f"    - 名称: {cmd.get('name', '')}")
+                        else:
+                            print(f"    - 命令类型错误: {type(cmd)}")
+                elif isinstance(cmd_list, dict):
+                    print(f"    - 名称: {cmd_list.get('name', '')}")
                 else:
                     print(f"    - 命令格式错误: {type(cmd_list)}")
         
@@ -443,7 +531,7 @@ class ProtocolManager:
                 protocol_id_hex = protocol.get('protocol_id_hex', '').upper()
                 if protocol_id_hex == protocol_id:
                     print(f"找到匹配的协议: {protocol.get('name', '')}")
-                return protocol
+                    return protocol
                 
         print(f"未找到匹配的协议或命令, 协议ID: {protocol_id}, 命令ID: {command_id}")
         return None
@@ -478,17 +566,17 @@ class ProtocolManager:
                     print(f"|     |- (非列表) {cmd_list.get('name', 'unknown') if isinstance(cmd_list, dict) else type(cmd_list)}")
 
     def get_protocol_commands(self, protocol_name):
-        """获取指定协议下的所有命令"""
-        print(f"获取协议 '{protocol_name}' 下的所有命令")
+        """获取指定协议的所有命令"""
+        print(f"获取协议 '{protocol_name}' 的命令")
         commands = []
-        
-        # 用于跟踪已添加的命令ID，避免重复
-        added_command_ids = set()
+        added_command_ids = set()  # 用于避免重复添加命令
         
         # 首先检查protocol_commands字典
         if protocol_name in self.protocol_commands:
             print(f"在protocol_commands中找到协议: {protocol_name}")
-            for command_id, command_list in self.protocol_commands[protocol_name].items():
+            protocol_commands = self.protocol_commands[protocol_name]
+            
+            for command_id, command_list in protocol_commands.items():
                 print(f"处理命令ID: {command_id}")
                 
                 # 根据命令列表类型处理
@@ -512,6 +600,12 @@ class ProtocolManager:
                     print(f"命令是字典，添加单个命令: {command_list.get('name', 'unnamed')}")
                     cmd_id = command_list.get('protocol_id_hex', '')
                     cmd_name = command_list.get('name', '')
+                    
+                    # 确保命令有必要的属性
+                    if not cmd_id or not cmd_name:
+                        print(f"命令缺少ID或名称: ID={cmd_id}, 名称={cmd_name}")
+                        continue
+                        
                     cmd_key = f"{cmd_name}_{cmd_id}"
                     
                     if cmd_key not in added_command_ids:
@@ -527,10 +621,20 @@ class ProtocolManager:
         # 然后检查protocols字典中的命令
         command_count = 0
         for protocol_key, protocol in self.protocols.items():
+            # 确保protocol是字典类型
+            if not isinstance(protocol, dict):
+                continue
+                
             if (protocol.get('type') == 'command' and 
                 protocol.get('protocol_name') == protocol_name):
                 cmd_id = protocol.get('protocol_id_hex', '')
                 cmd_name = protocol.get('name', '')
+                
+                # 确保命令有必要的属性
+                if not cmd_id or not cmd_name:
+                    print(f"protocols中的命令缺少ID或名称: ID={cmd_id}, 名称={cmd_name}")
+                    continue
+                    
                 cmd_key = f"{cmd_name}_{cmd_id}"
                 
                 if cmd_key not in added_command_ids:
@@ -556,11 +660,11 @@ class ProtocolManager:
         # 添加协议
         for key, protocol in self.protocols.items():
             if isinstance(protocol, dict):  # 确保是协议对象
-            name = protocol.get('name', key)
-            group = protocol.get('group', '')
-            if group:
-                name = f"[{group}] {name}"
-            result[key] = name
+                name = protocol.get('name', key)
+                group = protocol.get('group', '')
+                if group:
+                    name = f"[{group}] {name}"
+                result[key] = name
             
         # 添加命令
         for protocol_name, commands in self.protocol_commands.items():
@@ -569,9 +673,9 @@ class ProtocolManager:
                     for command in command_list:
                         if isinstance(command, dict):  # 确保是命令对象
                             name = command.get('name', command_id)
-                group = command.get('group', '')
-                if group:
-                    name = f"[{group}] {name}"
+                            group = command.get('group', '')
+                            if group:
+                                name = f"[{group}] {name}"
                             result[f"{command_id}"] = name
             
         return result
@@ -601,7 +705,7 @@ class ProtocolManager:
         target_obj = protocol
         
         # 如果是命令类型，确保目标是该命令对象
-        if protocol.get('type') == 'command':
+        if isinstance(protocol, dict) and protocol.get('type') == 'command':
             group = protocol.get('group', '')
             command_id = protocol.get('protocol_id_hex', '')
             
@@ -610,8 +714,34 @@ class ProtocolManager:
             # 检查命令字典中是否已存在该命令
             protocol_name = protocol.get('protocol_name', '')
             if protocol_name in self.protocol_commands and command_id in self.protocol_commands[protocol_name]:
-                target_obj = self.protocol_commands[protocol_name][command_id]
-                print(f"找到命令对象: {target_obj.get('name', '未命名')}")
+                command_list = self.protocol_commands[protocol_name][command_id]
+                
+                # 检查命令列表类型
+                if isinstance(command_list, list) and command_list:
+                    # 使用列表中的第一个元素
+                    if isinstance(command_list[0], dict):
+                        target_obj = command_list[0]
+                        print(f"找到命令对象(列表中): {target_obj.get('name', '未命名')}")
+                    else:
+                        print(f"警告: 命令列表的第一个元素不是字典: {type(command_list[0])}")
+                elif isinstance(command_list, dict):
+                    target_obj = command_list
+                    print(f"找到命令对象(字典): {target_obj.get('name', '未命名')}")
+                else:
+                    print(f"警告: 无法处理命令数据类型: {type(command_list)}")
+        elif isinstance(protocol, list) and protocol:
+            # 如果protocol本身是列表，使用第一个元素
+            if isinstance(protocol[0], dict):
+                target_obj = protocol[0]
+                print(f"使用协议列表的第一个元素: {target_obj.get('name', '未命名')}")
+            else:
+                print(f"警告: 协议列表的第一个元素不是字典: {type(protocol[0])}")
+                return False, f"字段添加失败: 协议数据格式错误"
+        
+        # 确保target_obj是字典类型
+        if not isinstance(target_obj, dict):
+            print(f"错误: 目标对象不是字典: {type(target_obj)}")
+            return False, f"字段添加失败: 目标对象类型错误"
         
         # 初始化fields字段
         if 'fields' not in target_obj:
@@ -636,9 +766,9 @@ class ProtocolManager:
         target_obj['fields'].append(new_field)
         
         # 保存更新后的协议
-        if protocol.get('type') == 'command':
-            group = protocol.get('group', '')
-            command_id = protocol.get('protocol_id_hex', '')
+        if isinstance(target_obj, dict) and target_obj.get('type') == 'command':
+            group = target_obj.get('group', '')
+            command_id = target_obj.get('protocol_id_hex', '')
             success, message = self.save_command(group, command_id, target_obj)
             print(f"保存命令结果: {success}, {message}")
         else:
@@ -652,14 +782,74 @@ class ProtocolManager:
 
     def remove_protocol_field(self, protocol_key, field_index):
         """从指定协议中删除字段"""
+        print(f"尝试从协议 {protocol_key} 中删除字段索引 {field_index}")
+        
+        # 获取协议，确保是字典类型
         if protocol_key in self.protocols:
             protocol = self.protocols[protocol_key]
+            print(f"从protocols字典中获取到协议类型: {type(protocol)}")
             
-            if 'fields' in protocol and 0 <= field_index < len(protocol['fields']):
-                del protocol['fields'][field_index]
-                return self.save_protocol(protocol)
+            # 检查协议类型
+            if isinstance(protocol, dict):
+                # 字典类型，直接操作
+                if 'fields' in protocol and isinstance(protocol['fields'], list) and 0 <= field_index < len(protocol['fields']):
+                    print(f"删除字典协议中的字段，当前字段数: {len(protocol['fields'])}")
+                    del protocol['fields'][field_index]
+                    return self.save_protocol(protocol)
+                else:
+                    print(f"字典协议缺少fields字段或索引无效, fields存在: {'fields' in protocol}, fields类型: {type(protocol.get('fields', None))}, 索引: {field_index}")
+            elif isinstance(protocol, list) and protocol:
+                # 列表类型，检查第一个元素是否为字典
+                if isinstance(protocol[0], dict):
+                    first_protocol = protocol[0]
+                    print(f"使用列表中的第一个元素，类型: {type(first_protocol)}")
+                    if 'fields' in first_protocol and isinstance(first_protocol['fields'], list) and 0 <= field_index < len(first_protocol['fields']):
+                        print(f"删除列表协议第一个元素中的字段，当前字段数: {len(first_protocol['fields'])}")
+                        del first_protocol['fields'][field_index]
+                        return self.save_protocol(first_protocol)
+                    else:
+                        print(f"列表第一个元素缺少fields字段或索引无效, fields存在: {'fields' in first_protocol}, fields类型: {type(first_protocol.get('fields', None))}, 索引: {field_index}")
+                else:
+                    print(f"列表中的第一个元素不是字典: {type(protocol[0])}")
+            else:
+                print(f"协议类型不是字典也不是列表: {type(protocol)}")
         
-        return False, "无法删除字段"
+        # 尝试查找命令（如果直接在protocols中没找到）
+        if '/' in protocol_key:
+            group, id_part = protocol_key.split('/', 1)
+            print(f"检查组 {group} 下的命令 ID {id_part}")
+            
+            # 检查是否在该组下找到对应ID的命令
+            for protocol_name, commands in self.protocol_commands.items():
+                if id_part in commands:
+                    command = commands[id_part]
+                    print(f"在命令字典中找到匹配: {protocol_name}/{id_part}, 类型: {type(command)}")
+                    
+                    # 根据命令类型处理
+                    if isinstance(command, dict):
+                        if 'fields' in command and isinstance(command['fields'], list) and 0 <= field_index < len(command['fields']):
+                            print(f"删除字典命令中的字段，当前字段数: {len(command['fields'])}")
+                            del command['fields'][field_index]
+                            return self.save_command(group, id_part, command)
+                        else:
+                            print(f"字典命令缺少fields字段或索引无效, fields存在: {'fields' in command}, fields类型: {type(command.get('fields', None))}, 索引: {field_index}")
+                    elif isinstance(command, list) and command:
+                        if isinstance(command[0], dict):
+                            first_command = command[0]
+                            print(f"使用命令列表中的第一个元素，类型: {type(first_command)}")
+                            if 'fields' in first_command and isinstance(first_command['fields'], list) and 0 <= field_index < len(first_command['fields']):
+                                print(f"删除列表命令第一个元素中的字段，当前字段数: {len(first_command['fields'])}")
+                                del first_command['fields'][field_index]
+                                return self.save_command(group, id_part, first_command)
+                            else:
+                                print(f"列表命令第一个元素缺少fields字段或索引无效, fields存在: {'fields' in first_command}, fields类型: {type(first_command.get('fields', None))}, 索引: {field_index}")
+                        else:
+                            print(f"命令列表中的第一个元素不是字典: {type(command[0])}")
+                    else:
+                        print(f"命令类型不是字典也不是列表: {type(command)}")
+        
+        print("无法删除字段：无法找到协议或命令，或字段索引无效")
+        return False, "无法删除字段：无法找到协议或命令，或字段索引无效"
 
     def get_field_type_by_size(self, byte_count):
         """根据字节数自动判断字段类型"""
@@ -683,18 +873,11 @@ class ProtocolManager:
     def get_supported_field_types(self):
         """获取支持的字段类型列表"""
         return [
-            # 将uxx、float、char、double、时间戳、bool放在最上面
             "u8", "u16", "u32", "u64", 
-            "float", "double",
-            "char", # 替代string类型
+            "float", 
+            "char",
             "timestamp", 
-            "bool",
-            # 文本类型
-            "ascii", "utf8", 
-            # 特殊类型
-            "date", "hex", 
-            # 其他类型
-            "bytes"
+            "bool"
         ]
 
     def parse_protocol_data(self, hex_data, protocol):
@@ -966,13 +1149,13 @@ class ProtocolManager:
             # 导入文档生成库
             if output_format == "docx":
                 try:
-                from docx import Document
+                    from docx import Document
                     from docx.shared import Pt, Cm, RGBColor
-                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                    from docx.enum.text import WD_ALIGN_PARAGRAPH
                     from docx.oxml.ns import qn
                     import datetime
                     
-                document = Document()
+                    document = Document()
                     
                     # 设置默认字体为微软雅黑
                     style = document.styles['Normal']
@@ -981,28 +1164,27 @@ class ProtocolManager:
                     # 中文字体设置
                     style._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
                 
-                # 设置文档标题
-                title = document.add_heading('协议文档', level=0)
-                title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    # 设置文档标题
+                    title = document.add_heading('协议文档', level=0)
+                    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     # 设置标题字体为微软雅黑
                     for run in title.runs:
                         run.font.name = '微软雅黑'
                         run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
                 
-                # 生成协议头部分
-                self._generate_header_doc(document, protocol_key)
-                
-                # 生成协议号列表
-                self._generate_protocol_list_doc(document, protocol_key)
-                
-                # 生成每个协议的命令字段详情
-                self._generate_protocol_fields_doc(document, protocol_key)
-                
-                # 保存文档
-                filename = f"协议文档_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-                document.save(filename)
-                return True, f"文档已生成: {filename}"
+                    # 生成协议头部分
+                    self._generate_header_doc(document, protocol_key)
                     
+                    # 生成协议号列表
+                    self._generate_protocol_list_doc(document, protocol_key)
+                    
+                    # 生成每个协议的命令字段详情
+                    self._generate_protocol_fields_doc(document, protocol_key)
+                    
+                    # 保存文档
+                    filename = f"协议文档_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+                    document.save(filename)
+                    return True, f"文档已生成: {filename}"
                 except ImportError:
                     return False, "缺少python-docx库，请安装: pip install python-docx"
                 except Exception as e:
@@ -1010,24 +1192,24 @@ class ProtocolManager:
                 
             elif output_format == "xlsx":
                 try:
-                import pandas as pd
-                import openpyxl
+                    import pandas as pd
+                    import openpyxl
                     from openpyxl.styles import Alignment, Font, PatternFill
                     import datetime
                 
-                # 创建Excel文件
+                    # 创建Excel文件
                     filename = f"协议文档_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
                     writer = pd.ExcelWriter(filename, engine='openpyxl')
                 
-                # 生成协议头表格
-                self._generate_header_excel(writer, protocol_key)
-                
-                # 生成协议号列表
-                self._generate_protocol_list_excel(writer, protocol_key)
-                
-                # 生成每个协议的命令字段详情
-                self._generate_protocol_fields_excel(writer, protocol_key)
-                
+                    # 生成协议头表格
+                    self._generate_header_excel(writer, protocol_key)
+                    
+                    # 生成协议号列表
+                    self._generate_protocol_list_excel(writer, protocol_key)
+                    
+                    # 生成每个协议的命令字段详情
+                    self._generate_protocol_fields_excel(writer, protocol_key)
+                    
                     # 设置所有工作表的字体为微软雅黑
                     workbook = writer.book
                     for sheet_name in workbook.sheetnames:
@@ -1037,10 +1219,9 @@ class ProtocolManager:
                                 if cell.value:
                                     cell.font = Font(name='微软雅黑', size=10)
                     
-                # 保存文件
+                    # 保存文件
                     writer.close()
                     return True, f"Excel文档已生成: {filename}"
-                
                 except ImportError:
                     return False, "缺少pandas或openpyxl库，请安装: pip install pandas openpyxl"
                 except Exception as e:
@@ -1145,7 +1326,7 @@ class ProtocolManager:
             protocol = self.protocols[protocol_key]
             if protocol.get('type') == 'protocol':
                 protocols = [protocol]
-        else:
+            else:
                 # 如果指定了命令，找到其所属的协议
                 protocol_name = protocol.get('protocol_name', '')
                 protocols = [p for p in self.protocols.values() 
@@ -1153,50 +1334,6 @@ class ProtocolManager:
         else:
             # 只选择类型为protocol的协议
             protocols = [p for p in self.protocols.values() if p.get('type') == 'protocol']
-        
-        if protocols:
-            # 按协议号排序
-            try:
-            sorted_protocols = sorted(protocols, key=lambda p: int(p.get('protocol_id_dec', '0') or '0'))
-            except (ValueError, TypeError):
-                # 如果排序失败，使用原始顺序
-                sorted_protocols = protocols
-            
-            table = document.add_table(rows=1, cols=2)
-            table.style = 'Table Grid'
-            
-            # 设置表头
-            hdr_cells = table.rows[0].cells
-            hdr_cells[0].text = '协议号'
-            hdr_cells[1].text = '协议说明'
-            
-            # 设置表头字体
-            for cell in hdr_cells:
-                for paragraph in cell.paragraphs:
-                    for run in paragraph.runs:
-                        run.font.name = '微软雅黑'
-                        run.font.bold = True
-                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
-            
-            # 填充数据
-            for protocol in sorted_protocols:
-                row_cells = table.add_row().cells
-                protocol_id = protocol.get('protocol_id_hex', '')
-                protocol_id_dec = protocol.get('protocol_id_dec', '')
-                row_cells[0].text = f"0x{protocol_id} ({protocol_id_dec})"
-                row_cells[1].text = f"{protocol.get('name', '')} - {protocol.get('description', '')}"
-                
-                # 设置数据单元格字体
-                for cell in row_cells:
-                    for paragraph in cell.paragraphs:
-                        for run in paragraph.runs:
-                            run.font.name = '微软雅黑'
-                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
-        else:
-            para = document.add_paragraph('未找到有效的协议定义')
-            for run in para.runs:
-                run.font.name = '微软雅黑'
-                run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
     
     def _generate_protocol_fields_doc(self, document, protocol_key=None):
         """生成协议字段详情文档"""
@@ -1223,7 +1360,7 @@ class ProtocolManager:
                 
                 # 添加此协议的所有命令
                 protocols.extend(protocol_commands) if protocol_commands else None
-        else:
+            else:
                 # 如果指定的是一个命令，只显示该命令
                 protocols = [specified_protocol]
         else:
@@ -1233,7 +1370,7 @@ class ProtocolManager:
         # 按类型分组：先显示所有协议，再显示所有命令
         protocol_types = {'protocol': [], 'command': []}
         
-            for protocol in protocols:
+        for protocol in protocols:
             protocol_type = protocol.get('type', 'unknown')
             if protocol_type in protocol_types:
                 protocol_types[protocol_type].append(protocol)
@@ -1305,8 +1442,8 @@ class ProtocolManager:
                         run.font.name = '微软雅黑'
                         run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
                 
-                # 添加分隔符
-                document.add_paragraph()
+                    # 添加分隔符
+                    document.add_paragraph()
         
         # 处理所有命令
         if protocol_types['command']:
@@ -1375,15 +1512,15 @@ class ProtocolManager:
                                 for run in paragraph.runs:
                                     run.font.name = '微软雅黑'
                                     run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
-        else:
+                else:
                     para = document.add_paragraph('此命令未定义字段')
                     # 设置字体
                     for run in para.runs:
                         run.font.name = '微软雅黑'
                         run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
                 
-                # 添加分隔符
-                document.add_paragraph()
+                    # 添加分隔符
+                    document.add_paragraph()
         
         # 如果没有协议和命令
         if not protocol_types['protocol'] and not protocol_types['command']:
@@ -1457,11 +1594,6 @@ class ProtocolManager:
             if protocol.get('type') == 'protocol':
                 protocols = [protocol]
         else:
-                # 如果指定了命令，找到其所属的协议
-                protocol_name = protocol.get('protocol_name', '')
-                protocols = [p for p in self.protocols.values() 
-                          if p.get('type') == 'protocol' and p.get('name') == protocol_name]
-        else:
             # 只选择类型为protocol的协议
             protocols = [p for p in self.protocols.values() if p.get('type') == 'protocol']
         
@@ -1516,16 +1648,13 @@ class ProtocolManager:
                 # 添加此协议的所有命令
                 protocols.extend(protocol_commands) if protocol_commands else None
         else:
-                # 如果指定的是一个命令，只显示该命令
-                protocols = [specified_protocol]
-        else:
-            # 如果没有指定协议，显示所有协议和命令
-            protocols = list(self.protocols.values())
+            # 如果指定的是一个命令，只显示该命令
+            protocols = [specified_protocol]
         
         # 按类型分组：先显示所有协议，再显示所有命令
         protocol_types = {'protocol': [], 'command': []}
         
-            for protocol in protocols:
+        for protocol in protocols:
             protocol_type = protocol.get('type', 'unknown')
             if protocol_type in protocol_types:
                 protocol_types[protocol_type].append(protocol)
@@ -1580,8 +1709,8 @@ class ProtocolManager:
                     cell.font = header_font
                     cell.fill = header_fill
                     cell.alignment = Alignment(horizontal='center', vertical='center')
-                else:
-                    # 创建空表格
+            else:
+                # 创建空表格
                 df = pd.DataFrame({'提示': ['协议未定义字段']})
                 df.to_excel(writer, sheet_name='协议字段详情', index=False)
         

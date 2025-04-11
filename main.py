@@ -1225,70 +1225,30 @@ class HexParserTool:
         """解析并显示协议数据"""
         # 检查协议是否有定义字段
         if not protocol or 'fields' not in protocol or not protocol.get('fields'):
-            self.parse_text.config(state=tk.NORMAL)
-            self.parse_text.delete("1.0", tk.END)
-            self.parse_text.insert(tk.END, f"协议名称: {protocol.get('name', '')}\n\n该协议没有定义字段，请先定义字段。")
-            self.parse_text.config(state=tk.DISABLED)
+            messagebox.showinfo("提示", f"协议 {protocol.get('name', '')} 没有定义字段，请先定义字段。")
             print(f"协议没有定义字段: {protocol.get('name', '')}")
             return
             
         # 解析协议数据
         result = self.protocol_manager.parse_protocol_data(hex_data, protocol)
         if not result:
-            self.parse_text.config(state=tk.NORMAL)
-            self.parse_text.delete("1.0", tk.END)
-            self.parse_text.insert(tk.END, f"解析协议数据失败，请检查协议定义。")
-            self.parse_text.config(state=tk.DISABLED)
+            messagebox.showinfo("提示", "解析协议数据失败，请检查协议定义。")
             print(f"解析协议数据失败: {protocol.get('name', '')}")
             return
         
-        # 格式化显示结果
-        display_text = f"协议名称: {result['protocol_name']}\n"
-        
-        # 只有命令才有ID，协议没有ID
-        if protocol.get('type') == 'command' and 'protocol_id' in result:
-            display_text += f"命令ID: {result['protocol_id']}\n"
-        
-        display_text += "-" * 24 + "\n"
-        
+        # 处理解析结果
         if not result['fields']:
-            display_text += "未找到匹配的字段。\n"
+            messagebox.showinfo("提示", "未找到匹配的字段。")
             print(f"未找到匹配的字段: {protocol.get('name', '')}, 字段列表: {protocol.get('fields', [])}")
         else:
-            for field in result['fields']:
-                display_text += f"{field['name']}: {field['value']}\n"
-                if field.get('description'):
-                    display_text += f"  说明: {field['description']}\n"
-                display_text += "\n"
-        
-        # 更新显示
-        self.parse_text.config(state=tk.NORMAL)
-        self.parse_text.delete("1.0", tk.END)
-        self.parse_text.insert(tk.END, display_text)
-        
-        # 为字段名添加点击事件
-        for field in result.get('fields', []):
-            field_pos = display_text.find(f"{field['name']}:")
-            if field_pos >= 0:
-                line_count = display_text[:field_pos].count('\n') + 1
-                field_line_pos = f"{line_count}.0"
-                field_name_end = f"{line_count}.{len(field['name']) + 1}"  # +1 for ":"
-                
-                tag_name = f"field_{field['name']}"
-                self.parse_text.tag_add(tag_name, field_line_pos, field_name_end)
-                self.parse_text.tag_config(tag_name, foreground="blue", underline=1)
-                
-                # 绑定点击事件
-                self.parse_text.tag_bind(tag_name, "<Button-1>", 
-                                        lambda e, f=field: self._on_field_click(e, f))
-        
-        self.parse_text.config(state=tk.DISABLED)
+            # 更新参数表格
+            self._update_parameter_table(result['fields'])
         
         # 高亮显示已定义字段
         self._highlight_defined_fields(protocol, hex_data)
 
     def _on_field_click(self, event, field):
-        """字段名称点击事件处理"""
+        """字段点击事件处理"""
         if not hasattr(self, 'current_protocol') or not self.current_protocol:
             return
             
@@ -1304,12 +1264,11 @@ class HexParserTool:
                     end_pos = protocol_field.get('end_pos', 0)
                     break
         
-        # 打开协议编辑器并高亮字段
-        editor = ProtocolEditor(self.root, self.protocol_manager, 
-                              self.current_protocol_key, highlight_field=(start_pos, end_pos))
-                              
+        # 高亮显示字段在输出区域的位置
+        self._highlight_field_in_output(start_pos, end_pos, field.get('name', ''))
+        
         # 更新状态栏
-        self.status_var.set(f"查看字段: {field.get('name')} (位置: {start_pos}-{end_pos})")
+        self.status_var.set(f"已选择字段: {field.get('name', '')} (位置: {start_pos}-{end_pos})")
 
     def _identify_protocol(self):
         """识别协议按钮事件处理"""
@@ -1351,15 +1310,6 @@ class HexParserTool:
             # 匹配到命令
             parent_protocol = matched.get('protocol_name', '')
             
-            # 更新界面显示
-            self.parse_text.config(state=tk.NORMAL)
-            self.parse_text.delete("1.0", tk.END)
-            self.parse_text.insert(tk.END, "识别结果\n", "title")
-            self.parse_text.insert(tk.END, f"命令: {protocol_name}\n", "subtitle")
-            self.parse_text.insert(tk.END, f"ID: 0x{command_id_hex}\n", "normal")
-            self.parse_text.insert(tk.END, f"协议: {parent_protocol}\n", "normal")
-            self.parse_text.insert(tk.END, f"描述: {matched.get('description', '')}\n\n", "normal")
-            
             # 更新协议和命令下拉框
             self._update_protocol_dropdown()
             
@@ -1392,14 +1342,6 @@ class HexParserTool:
         else:
             # 匹配到协议
             protocol_id = matched.get('protocol_id_hex', '')
-            
-            # 更新界面显示
-            self.parse_text.config(state=tk.NORMAL)
-            self.parse_text.delete("1.0", tk.END)
-            self.parse_text.insert(tk.END, "识别结果\n", "title")
-            self.parse_text.insert(tk.END, f"协议: {protocol_name}\n", "subtitle")
-            self.parse_text.insert(tk.END, f"ID: 0x{protocol_id}\n", "normal")
-            self.parse_text.insert(tk.END, f"描述: {matched.get('description', '')}\n\n", "normal")
             
             # 自动选择匹配到的协议
             self._update_protocol_dropdown()

@@ -11,8 +11,16 @@ class HexParserTool:
     """16进制数据解析工具主界面"""
     
     def __init__(self, root):
+        """初始化数据解析工具"""
         self.root = root
-        self.root.title("DataFormater  --2.1.3")
+        self.root.title("DataFormater  --2.2.4")
+        self.root.geometry("1200x800")
+        
+        # 修复输入法问题
+        self.root.bind("<FocusIn>", self._fix_input_method)
+        
+        # 绑定键盘事件修复特殊字符输入问题
+        self.root.bind_all("<Key>", self._on_key_press)
         
         # 初始化协议管理器
         self.protocol_manager = ProtocolManager()
@@ -67,20 +75,64 @@ class HexParserTool:
         self.style.configure("TRadiobutton", background="#f0f0f0")
     
     def _create_menu(self):
-        """创建菜单栏"""
+        """创建菜单"""
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
         
-        # 工具菜单
-        tools_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="工具", menu=tools_menu)
-        tools_menu.add_command(label="协议编辑器", command=self._open_protocol_editor)
-        tools_menu.add_command(label="生成协议文档", command=self._generate_protocol_doc)
+        # 文件菜单
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="协议编辑器", command=self._open_protocol_editor)
+        file_menu.add_separator()
+        file_menu.add_command(label="导入JSON文本", command=self._import_json_dialog)
+        file_menu.add_command(label="导出协议命令", command=self._export_protocol_commands)
+        file_menu.add_command(label="生成协议文档", command=self._generate_protocol_doc)
+        file_menu.add_separator()
+        file_menu.add_command(label="退出", command=self.root.quit)
+        menubar.add_cascade(label="文件", menu=file_menu)
         
         # 帮助菜单
         help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="帮助", menu=help_menu)
         help_menu.add_command(label="关于", command=self._show_about)
+        menubar.add_cascade(label="帮助", menu=help_menu)
+        
+    def _export_protocol_commands(self):
+        """导出协议命令为JSON格式"""
+        # 获取当前选中的协议
+        selected_protocol = self.protocol_var.get()
+        if not selected_protocol:
+            # 如果没有选中协议，提示用户选择
+            messagebox.showinfo("提示", "请先选择一个协议")
+            return
+            
+        # 提取协议名称
+        protocol_name = selected_protocol.split('(')[0].strip()
+        
+        # 获取该协议下的所有命令
+        commands = self.protocol_manager.get_protocol_commands(protocol_name)
+        if not commands:
+            messagebox.showinfo("提示", f"协议 {protocol_name} 没有命令")
+            return
+            
+        # 整理命令数据
+        command_data = {}
+        command_data[protocol_name] = {}
+        
+        for command in commands:
+            if isinstance(command, dict):
+                cmd_id = command.get('protocol_id_hex', '')
+                if cmd_id:
+                    if cmd_id not in command_data[protocol_name]:
+                        command_data[protocol_name][cmd_id] = []
+                    command_data[protocol_name][cmd_id].append(command)
+        
+        # 保存到文件
+        try:
+            filename = f"{protocol_name}_commands.json"
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(command_data, f, ensure_ascii=False, indent=2)
+            messagebox.showinfo("成功", f"命令已导出到文件: {filename}")
+        except Exception as e:
+            messagebox.showerror("错误", f"导出命令失败: {str(e)}")
     
     def _create_input_area(self):
         """创建输入区域"""
@@ -334,6 +386,17 @@ class HexParserTool:
         if not raw_input:
             messagebox.showinfo("提示", "请先输入数据")
             return
+        
+        # 检查是否是JSON格式
+        if raw_input.startswith('{') and raw_input.endswith('}'):
+            # 尝试作为JSON协议导入
+            try:
+                # 调用导入JSON文本的方法
+                self._import_json_text(raw_input)
+                return
+            except Exception as e:
+                print(f"JSON格式检测失败，将按普通16进制数据处理: {e}")
+                # 继续以普通16进制数据处理
             
         # 提取数据，仅删除Wireshark标识符和换行符
         formatted_text = self._extract_hex(raw_input)
@@ -448,11 +511,47 @@ class HexParserTool:
         self.archive_btn.config(state=tk.NORMAL)
         self.identify_btn.config(state=tk.NORMAL)
     
+    def _import_json_text(self, json_text):
+        """导入JSON格式的协议命令文本
+        
+        参数:
+            json_text (str): JSON文本
+        """
+        try:
+            # 调用ProtocolManager的导入JSON文本方法
+            success, message = self.protocol_manager.import_commands_from_text(json_text)
+            
+            if success:
+                # 显示成功消息
+                messagebox.showinfo("导入成功", message)
+                
+                # 更新协议下拉框
+                self._update_protocol_dropdown()
+                
+                # 更新命令下拉框
+                self._update_command_combo()
+                
+                # 清空输入框
+                self.input_text.delete(1.0, tk.END)
+                
+                # 设置状态栏消息
+                self.status_var.set(message)
+            else:
+                # 显示错误消息
+                messagebox.showerror("导入失败", message)
+        except Exception as e:
+            # 显示异常消息
+            messagebox.showerror("导入错误", f"导入JSON文本时出错: {str(e)}")
+            print(f"导入JSON文本出错: {e}")
+    
     def _archive_protocol(self):
         """归入协议"""
         if not self.raw_hex_data:
             messagebox.showinfo("提示", "请先格式化数据")
             return
+        
+        # 优先使用原始数据（如果存在）
+        hex_data = self.original_hex_data if hasattr(self, 'original_hex_data') else self.raw_hex_data
         
         # 检查是否已经选择了协议
         selected_protocol = self.protocol_var.get()
@@ -469,7 +568,7 @@ class HexParserTool:
                 # 打开协议选择对话框，传入父协议
                 dialog = ProtocolSelectionDialog(
                     self.root,
-                    self.raw_hex_data,
+                    hex_data,
                     self._save_protocol_callback,
                     parent_protocol=parent_protocol
                 )
@@ -479,7 +578,7 @@ class HexParserTool:
             # 如果没有选择协议，打开普通的协议选择对话框
             dialog = ProtocolSelectionDialog(
                 self.root,
-                self.raw_hex_data,
+                hex_data,
                 self._save_protocol_callback
             )
             
@@ -508,6 +607,9 @@ class HexParserTool:
             if success:
                 print(f"协议保存成功，返回信息: {message}")
                 
+                # 无论是协议还是命令，都强制更新下拉框
+                self._update_protocol_dropdown()
+                
                 # 如果是命令类型，需要更新命令下拉框
                 if protocol_type == 'command':
                     # 获取协议名称
@@ -534,12 +636,9 @@ class HexParserTool:
                         # 确保命令数据包含字段列表
                         if 'fields' not in protocol_data:
                             protocol_data['fields'] = []
-                            
-                        # 更新协议下拉框和命令下拉框
-                        self._update_protocol_dropdown()
-                        
+                           
                         # 如果当前选择的是该命令的父协议，更新命令下拉框
-                        if protocol_name == selected_protocol:
+                        if protocol_name == selected_protocol.split('(')[0].strip():
                             self._on_protocol_selected(None)  # 触发命令下拉框更新
                             
                         # 显示成功消息
@@ -554,6 +653,16 @@ class HexParserTool:
                     print("保存的是协议类型，不生成单独的JSON文件")
                     print("=" * 50)
                     messagebox.showinfo("成功", "协议保存成功")
+                    
+                    # 强制刷新协议下拉框并选中新保存的协议
+                    self._update_protocol_dropdown()
+                    protocol_name = protocol_data.get('name', '')
+                    for i, value in enumerate(self.protocol_dropdown['values']):
+                        if protocol_name in value:
+                            self.protocol_dropdown.current(i)
+                            self.protocol_var.set(value)
+                            self._on_protocol_selected(None)  # 触发命令下拉框更新
+                            break
         except Exception as e:
             error_msg = f"保存协议失败: {str(e)}"
             print(error_msg)
@@ -1181,13 +1290,21 @@ class HexParserTool:
         protocol_name = command_data.get('protocol_name', '')
         command_id_hex = command_data.get('protocol_id_hex', '')
         group = command_data.get('group', '')
+        command_name = command_data.get('name', '')  # 获取命令名称
         
-        if group and command_id_hex:
+        # 使用更详细的命令键格式：group/id/name
+        if group and command_id_hex and command_name:
+            self.current_protocol_key = f"{group}/{command_id_hex}/{command_name}"
+        elif protocol_name and command_id_hex and command_name:
+            self.current_protocol_key = f"{protocol_name}/{command_id_hex}/{command_name}"
+        elif group and command_id_hex:
             self.current_protocol_key = f"{group}/{command_id_hex}"
         elif protocol_name and command_id_hex:
             self.current_protocol_key = f"{protocol_name}/{command_id_hex}"
         else:
             self.current_protocol_key = command_id_hex
+            
+        print(f"使用协议键: {self.current_protocol_key}")
             
         # 初始化 command_data 字典，用于存储所有命令数据
         if not hasattr(self, 'command_data'):
@@ -1225,8 +1342,20 @@ class HexParserTool:
         """解析并显示协议数据"""
         # 检查协议是否有定义字段
         if not protocol or 'fields' not in protocol or not protocol.get('fields'):
-            messagebox.showinfo("提示", f"协议 {protocol.get('name', '')} 没有定义字段，请先定义字段。")
-            print(f"协议没有定义字段: {protocol.get('name', '')}")
+            protocol_name = protocol.get('name', '')
+            if messagebox.askyesno("提示", f"协议/命令 '{protocol_name}' 没有定义字段，是否打开编辑器定义字段？"):
+                # 打开协议编辑器
+                protocol_key = f"{protocol.get('group', '')}/{protocol.get('protocol_id_hex', '')}"
+                dialog = ProtocolEditor(self.root, self.protocol_manager, protocol_key)
+                # 等待编辑器关闭后重新尝试解析
+                self.root.wait_window(dialog)
+                # 重新获取协议数据
+                updated_protocol = self.protocol_manager.get_protocol_by_key(protocol_key)
+                if updated_protocol and 'fields' in updated_protocol and updated_protocol.get('fields'):
+                    # 重新解析
+                    return self._parse_and_display_protocol(updated_protocol, hex_data)
+            
+            print(f"协议没有定义字段: {protocol_name}")
             return
             
         # 解析协议数据
@@ -1280,6 +1409,9 @@ class HexParserTool:
         print("执行识别协议操作")
         print(f"待识别的数据: {self.raw_hex_data[:20]}...")
         
+        # 备份原始数据，避免后续操作修改它
+        self.original_hex_data = self.raw_hex_data
+        
         # 尝试提取命令ID
         command_id = ""
         if len(self.raw_hex_data) >= 8:
@@ -1331,9 +1463,20 @@ class HexParserTool:
                         self._on_command_selected(None)
                         break
             
-            # 解析并显示命令数据
+            # 解析并显示命令数据 - 不弹出定义字段提示
             try:
-                self._parse_and_display_protocol(matched, self.raw_hex_data)
+                # 如果命令没有字段定义，直接更新参数表格，不提示
+                if not matched.get('fields'):
+                    self._update_parameter_table([])
+                    self._highlight_defined_fields(matched, self.raw_hex_data)
+                else:
+                    # 解析数据并更新UI
+                    parsed_data = self.protocol_manager.parse_protocol_data(self.raw_hex_data, matched)
+                    if parsed_data and 'fields' in parsed_data:
+                        self._update_parameter_table(parsed_data.get('fields', []))
+                    else:
+                        self._update_parameter_table(matched.get('fields', []))
+                    self._highlight_defined_fields(matched, self.raw_hex_data)
             except Exception as e:
                 print(f"解析命令数据出错: {e}")
                 messagebox.showerror("错误", f"解析命令数据出错: {str(e)}")
@@ -1352,9 +1495,20 @@ class HexParserTool:
                     self._on_protocol_selected(None)
                     break
                 
-            # 解析并显示协议数据
+            # 解析并显示协议数据 - 不弹出定义字段提示
             try:
-                self._parse_and_display_protocol(matched, self.raw_hex_data)
+                # 如果协议没有字段定义，直接更新参数表格，不提示
+                if not matched.get('fields'):
+                    self._update_parameter_table([])
+                    self._highlight_defined_fields(matched, self.raw_hex_data)
+                else:
+                    # 解析数据并更新UI
+                    parsed_data = self.protocol_manager.parse_protocol_data(self.raw_hex_data, matched)
+                    if parsed_data and 'fields' in parsed_data:
+                        self._update_parameter_table(parsed_data.get('fields', []))
+                    else:
+                        self._update_parameter_table(matched.get('fields', []))
+                    self._highlight_defined_fields(matched, self.raw_hex_data)
             except Exception as e:
                 print(f"解析协议数据出错: {e}")
                 messagebox.showerror("错误", f"解析协议数据出错: {str(e)}")
@@ -1503,10 +1657,15 @@ class HexParserTool:
         if not isinstance(command_data, dict):
             return {'success': False, 'message': f'命令数据格式错误: 预期字典类型，实际为{type(command_data)}'}
         
-        # 获取命令的键
-        command_id = command_data.get('protocol_id_hex', '')
-        group = command_data.get('group', '')
-        command_key = f"{group}/{command_id}" if group else command_id
+        # 使用已保存的current_protocol_key，它包含了命令名称
+        if hasattr(self, 'current_protocol_key') and self.current_protocol_key:
+            command_key = self.current_protocol_key
+        else:
+            # 如果没有，构建命令键（应该包含命令名称）
+            command_id = command_data.get('protocol_id_hex', '')
+            group = command_data.get('group', '')
+            command_name = command_data.get('name', '')
+            command_key = f"{group}/{command_id}/{command_name}" if group else f"{command_id}/{command_name}"
         
         if not command_key:
             return {'success': False, 'message': '无法获取命令键值'}
@@ -1529,6 +1688,7 @@ class HexParserTool:
                     # 计算长度作为第四个参数
                     field_length = end_pos - start_pos + 1
                     
+                    # 使用add_protocol_field方法添加字段
                     success, message = self.protocol_manager.add_protocol_field(
                         command_key, field_name, field_type, start_pos, field_length)
                     
@@ -1549,37 +1709,18 @@ class HexParserTool:
                             return {'success': False, 'message': '无法获取更新后的命令数据'}
                     else:
                         print(f"字段添加失败: {message}")
-                
+                    
                     return {'success': success, 'message': message}
                     
             elif data['action'] == 'update_field':
                 if 'field_data' in data and 'field_index' in data:
-                    # 获取当前命令
-                    command = self.protocol_manager.get_protocol_by_key(command_key)
-                    if not command:
-                        return {'success': False, 'message': '无法获取命令信息'}
-                        
-                    # 类型检查，确保command是字典类型
-                    if not isinstance(command, dict):
-                        print(f"警告: 获取到的command不是字典类型: {type(command)}")
-                        return {'success': False, 'message': f'命令数据格式错误: 预期字典类型，实际为{type(command)}'}
-                    
-                    if 'fields' not in command:
-                        return {'success': False, 'message': '命令没有字段属性'}
-                    
                     field_index = data['field_index']
-                    if field_index < 0 or field_index >= len(command['fields']):
-                        return {'success': False, 'message': '无效的字段索引'}
-                    
                     field_data = data['field_data']
                     print(f"更新命令 {command_key} 字段: {field_data.get('name', '')}, 索引: {field_index}")
-                    # 更新字段
-                    command['fields'][field_index] = field_data
                     
-                    # 保存命令
-                    group = command.get('group', '')
-                    cmd_id = command.get('protocol_id_hex', '')
-                    success, message = self.protocol_manager.save_command(group, cmd_id, command)
+                    # 使用update_protocol_field方法更新字段
+                    success, message = self.protocol_manager.update_protocol_field(
+                        command_key, field_index, field_data)
                     
                     # 刷新当前命令数据
                     if success:
@@ -1800,9 +1941,12 @@ class HexParserTool:
             # 如果没有字段，显示一个提示信息
             ttk.Label(self.parameter_frame, text="暂无字段定义").grid(row=0, column=0, sticky="nsew")
             return
+        
+        # 按照起始位置从小到大排序字段
+        sorted_fields = sorted(fields, key=lambda f: f.get('start_pos', 0))
             
         # 创建表格标题
-        headers = ["名称", "类型", "位置", "长度", "描述"]
+        headers = ["名称", "类型", "位置", "解析值", "描述"]
         for col, header in enumerate(headers):
             label = ttk.Label(self.parameter_frame, text=header, relief="ridge")
             label.grid(row=0, column=col, sticky="nsew")
@@ -1813,14 +1957,21 @@ class HexParserTool:
         self.field_labels = []
         
         # 添加字段行
-        for row, field in enumerate(fields, start=1):
+        for row, field in enumerate(sorted_fields, start=1):
             # 获取字段信息
             field_name = field.get('name', '')
             field_type = field.get('type', '')
             start_pos = field.get('start_pos', 0)
             end_pos = field.get('end_pos', 0)
-            length = end_pos - start_pos + 1
             description = field.get('description', '')
+            
+            # 获取解析值（如果存在）
+            value = field.get('value', '')
+            if value == '':
+                length = end_pos - start_pos + 1
+                value = str(length)  # 如果没有解析值，显示长度
+            else:
+                value = str(value)  # 确保值是字符串
             
             # 创建字段信息单元格
             name_label = ttk.Label(self.parameter_frame, text=field_name, relief="ridge", cursor="hand2")
@@ -1832,14 +1983,14 @@ class HexParserTool:
             pos_label = ttk.Label(self.parameter_frame, text=f"{start_pos}-{end_pos}", relief="ridge", cursor="hand2")
             pos_label.grid(row=row, column=2, sticky="nsew")
             
-            len_label = ttk.Label(self.parameter_frame, text=str(length), relief="ridge", cursor="hand2")
-            len_label.grid(row=row, column=3, sticky="nsew")
+            value_label = ttk.Label(self.parameter_frame, text=value, relief="ridge", cursor="hand2")
+            value_label.grid(row=row, column=3, sticky="nsew")
             
             desc_label = ttk.Label(self.parameter_frame, text=description, relief="ridge", cursor="hand2")
             desc_label.grid(row=row, column=4, sticky="nsew")
             
             # 存储字段信息和对应的标签
-            row_labels = [name_label, type_label, pos_label, len_label, desc_label]
+            row_labels = [name_label, type_label, pos_label, value_label, desc_label]
             field_info = {'start_pos': start_pos, 'end_pos': end_pos, 'name': field_name}
             self.field_labels.append((row_labels, field_info))
             
@@ -1870,6 +2021,12 @@ class HexParserTool:
     
     def _highlight_field_in_output(self, start_pos, end_pos, field_name=""):
         """在输出文本中高亮显示指定位置的字段"""
+        if not self.raw_hex_data:
+            print("没有数据可供高亮显示")
+            return
+            
+        print(f"尝试高亮显示字段: {field_name}, 位置: {start_pos}-{end_pos}")
+            
         if self.output_text.cget("state") == tk.DISABLED:
             self.output_text.config(state=tk.NORMAL)
             
@@ -1896,6 +2053,7 @@ class HexParserTool:
         
         # 找出字段对应的文本位置并高亮
         highlighted = False
+        
         for line_num, offset in line_offsets:
             line_text = all_lines[line_num-1]
             
@@ -1914,29 +2072,65 @@ class HexParserTool:
                 line_byte_end = highlight_end - line_start
                 
                 # 计算文本位置
-                text_start_col = 6 + line_byte_start * 3  # 每个字节占3列（2个字符+1个空格）
-                text_end_col = 6 + line_byte_end * 3 + 2  # +2包含最后一个字节的完整宽度
+                # 考虑到每行的格式是: "0000: 00 11 22 33 | ...."
+                # 其中6是偏移量后面的": "和一个空格的长度
+                offset_and_space_len = len(f"{offset:04X}: ")  # 计算实际的偏移量字符串长度
+                
+                # 考虑每个字节占3列（2个16进制字符 + 1个空格）
+                text_start_col = offset_and_space_len + line_byte_start * 3
+                
+                # 对于最后一个字节，不要包含后面的空格
+                if line_byte_end == bytes_per_line - 1:
+                    text_end_col = offset_and_space_len + line_byte_end * 3 + 2
+                else:
+                    text_end_col = offset_and_space_len + line_byte_end * 3 + 3
                 
                 # 高亮显示十六进制部分
                 text_start = f"{line_num}.{text_start_col}"
                 text_end = f"{line_num}.{text_end_col}"
+                
+                print(f"添加高亮: 行 {line_num}, 列 {text_start_col}-{text_end_col}")
                 self.output_text.tag_add("field_highlight", text_start, text_end)
                 
-                # 高亮显示ASCII部分
-                ascii_start_index = line_text.find('|') + 1
-                if ascii_start_index > 0:
-                    ascii_start = f"{line_num}.{ascii_start_index + line_byte_start}"
-                    ascii_end = f"{line_num}.{ascii_start_index + line_byte_end + 1}"
+                # 查找ASCII部分的起始位置
+                pipe_index = line_text.find('|')
+                if pipe_index > 0:
+                    # 计算ASCII部分起始位置
+                    ascii_start_col = pipe_index + 2  # | 后面有一个空格
+                    
+                    # 计算ASCII部分中需要高亮的字符位置
+                    # 修复：ASCII部分高亮偏移问题，将起始位置向前移一位
+                    ascii_start = f"{line_num}.{ascii_start_col + line_byte_start - 1}"  # 减1修复偏移
+                    ascii_end = f"{line_num}.{ascii_start_col + line_byte_end}"  # 去掉+1修复结束偏移
+                    
+                    print(f"添加ASCII高亮: 行 {line_num}, 列 {ascii_start_col + line_byte_start - 1}-{ascii_start_col + line_byte_end}")
                     self.output_text.tag_add("field_highlight", ascii_start, ascii_end)
                 
                 highlighted = True
         
-        # 配置高亮样式 - 使用醒目的背景色
-        self.output_text.tag_config("field_highlight", background="#FFFF00")
+        # 配置高亮样式 - 使用醒目的背景色和文本颜色
+        self.output_text.tag_config("field_highlight", background="#FFFF00", foreground="#000000")
+        
+        # 提高field_highlight标签的优先级，使其覆盖defined_field标签
+        # 需要先检查defined_field标签是否已经定义
+        try:
+            # 尝试获取defined_field标签的配置信息，如果不存在会抛出异常
+            self.output_text.tag_cget("defined_field", "background")
+            # 如果defined_field标签存在，提高field_highlight的优先级
+            self.output_text.tag_raise("field_highlight", "defined_field")
+        except tk.TclError:
+            # defined_field标签未定义，不需要提升优先级
+            pass
         
         if highlighted:
             # 尝试将视图滚动到第一个高亮部分
-            self.output_text.see("field_highlight.first")
+            try:
+                self.output_text.see("field_highlight.first")
+                print("成功滚动到高亮部分")
+            except Exception as e:
+                print(f"滚动到高亮部分失败: {e}")
+        else:
+            print("未能高亮任何内容")
         
         self.output_text.config(state=tk.DISABLED)
 
@@ -1994,6 +2188,81 @@ class HexParserTool:
             if command_values:
                 self.command_var.set(command_values[0])
                 self._on_command_selected(None)  # 触发命令选择事件
+
+    def _import_json_dialog(self):
+        """打开JSON文本导入对话框"""
+        # 创建导入对话框
+        dialog = tk.Toplevel(self.root)
+        dialog.title("导入JSON文本")
+        dialog.geometry("600x400")
+        dialog.grab_set()  # 模态对话框
+        
+        # 设置图标和样式
+        dialog.transient(self.root)
+        
+        # 说明标签
+        ttk.Label(dialog, text="请粘贴JSON格式的协议/命令数据:").pack(anchor=tk.W, padx=10, pady=(10, 5))
+        
+        # 文本框
+        text_area = scrolledtext.ScrolledText(dialog, width=80, height=20)
+        text_area.pack(fill=tk.BOTH, padx=10, pady=(5, 10), expand=True)
+        
+        # 按钮框架
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(fill=tk.X, pady=10, padx=10)
+        
+        # 导入按钮回调函数
+        def do_import():
+            json_text = text_area.get(1.0, tk.END).strip()
+            if not json_text:
+                messagebox.showwarning("警告", "请输入JSON数据", parent=dialog)
+                return
+                
+            try:
+                # 调用_import_json_text方法进行导入
+                self._import_json_text(json_text)
+                dialog.destroy()
+            except Exception as e:
+                messagebox.showerror("错误", f"导入JSON文本时出错: {str(e)}", parent=dialog)
+        
+        ttk.Button(button_frame, text="导入", command=do_import, width=15).pack(side=tk.LEFT)
+        ttk.Button(button_frame, text="取消", command=dialog.destroy, width=15).pack(side=tk.RIGHT)
+        
+        # 居中显示对话框
+        dialog.update_idletasks()
+        width = dialog.winfo_width()
+        height = dialog.winfo_height()
+        x = (dialog.winfo_screenwidth() - width) // 2
+        y = (dialog.winfo_screenheight() - height) // 2
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _fix_input_method(self, event=None):
+        """修复输入法问题"""
+        # 重置输入法状态
+        try:
+            # 设置输入法为英文模式
+            self.root.tk.call('tk_focusNext', self.root)
+            self.root.focus_set()
+        except Exception as e:
+            print(f"修复输入法出错: {e}")
+    
+    def _reset_input_on_widget(self, widget):
+        """递归重置所有输入控件的输入法状态"""
+        # 不再使用insertontime选项，该选项某些控件不支持
+        pass
+
+    def _on_key_press(self, event):
+        """处理键盘事件，修复输入法问题"""
+        # 获取当前具有焦点的控件
+        focused = self.root.focus_get()
+        
+        # 检查是否需要修复输入法问题
+        if focused and event.char and focused.winfo_class() in ('Entry', 'Text', 'TEntry'):
+            # 不再特殊处理左括号，因为会导致重复输入
+            pass
+            
+        # 返回None表示继续处理事件
+        return None
 
 if __name__ == "__main__":
     root = tk.Tk()

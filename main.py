@@ -16,11 +16,9 @@ class HexParserTool:
         self.root.title("DataFormater  --2.2.4")
         self.root.geometry("1200x800")
         
-        # 修复输入法问题
-        self.root.bind("<FocusIn>", self._fix_input_method)
-        
-        # 绑定键盘事件修复特殊字符输入问题
-        self.root.bind_all("<Key>", self._on_key_press)
+        # 不再绑定全局键盘事件，因为它会干扰正常输入
+        # self.root.bind("<FocusIn>", self._fix_input_method)
+        # self.root.bind_all("<Key>", self._on_key_press)
         
         # 初始化协议管理器
         self.protocol_manager = ProtocolManager()
@@ -1234,6 +1232,24 @@ class HexParserTool:
         if not selected_command:
             return
             
+        print("切换命令: " + selected_command)
+            
+        # 清除之前的字段高亮 - 更彻底地清除所有可能的高光
+        if hasattr(self, 'output_text'):
+            # 确保文本可编辑
+            if self.output_text.cget("state") == tk.DISABLED:
+                self.output_text.config(state=tk.NORMAL)
+                
+            # 清除所有可能的高光标签
+            self.output_text.tag_remove("field_highlight", "1.0", tk.END)
+            self.output_text.tag_remove("defined_field", "1.0", tk.END)
+            self.output_text.tag_remove("selection", "1.0", tk.END)
+            
+            # 恢复文本状态
+            self.output_text.config(state=tk.DISABLED)
+            
+            print("已清除所有高光")
+            
         # 从显示名称中提取命令名称和ID
         try:
             # 格式为 "命令名称 (0x命令ID)"
@@ -1290,7 +1306,7 @@ class HexParserTool:
         protocol_name = command_data.get('protocol_name', '')
         command_id_hex = command_data.get('protocol_id_hex', '')
         group = command_data.get('group', '')
-        command_name = command_data.get('name', '')  # 获取命令名称
+        command_name = command_data.get('name', '')
         
         # 使用更详细的命令键格式：group/id/name
         if group and command_id_hex and command_name:
@@ -1319,6 +1335,11 @@ class HexParserTool:
         # 更新参数表格
         if 'fields' in command_data:
             self._update_parameter_table(command_data.get('fields', []))
+        
+        # 为新选择的命令添加灰色高光 (defined_field)
+        if self.raw_hex_data and 'fields' in command_data and command_data['fields']:
+            print("为新选择的命令添加灰色高光")
+            self._highlight_defined_fields(command_data, self.raw_hex_data)
         
         # 应用命令模板解析当前数据
         if self.raw_hex_data and 'fields' in command_data:
@@ -2033,6 +2054,11 @@ class HexParserTool:
         # 清除以前的高亮
         self.output_text.tag_remove("field_highlight", "1.0", tk.END)
         
+        # 如果传入的是无效位置(负数)，则只清除高亮不添加新高亮
+        if start_pos < 0 or end_pos < 0:
+            self.output_text.config(state=tk.DISABLED)
+            return
+            
         # 获取所有可见行的文本内容，提取每行的偏移量
         bytes_per_line = self.bytes_per_line.get()
         all_lines = self.output_text.get("1.0", tk.END).split('\n')
@@ -2238,31 +2264,18 @@ class HexParserTool:
 
     def _fix_input_method(self, event=None):
         """修复输入法问题"""
-        # 重置输入法状态
-        try:
-            # 设置输入法为英文模式
-            self.root.tk.call('tk_focusNext', self.root)
-            self.root.focus_set()
-        except Exception as e:
-            print(f"修复输入法出错: {e}")
+        # 该方法不再使用
+        pass
     
     def _reset_input_on_widget(self, widget):
         """递归重置所有输入控件的输入法状态"""
-        # 不再使用insertontime选项，该选项某些控件不支持
+        # 该方法不再使用
         pass
-
+        
     def _on_key_press(self, event):
         """处理键盘事件，修复输入法问题"""
-        # 获取当前具有焦点的控件
-        focused = self.root.focus_get()
-        
-        # 检查是否需要修复输入法问题
-        if focused and event.char and focused.winfo_class() in ('Entry', 'Text', 'TEntry'):
-            # 不再特殊处理左括号，因为会导致重复输入
-            pass
-            
-        # 返回None表示继续处理事件
-        return None
+        # 该方法不再使用，防止干扰正常输入
+        pass
 
 if __name__ == "__main__":
     root = tk.Tk()

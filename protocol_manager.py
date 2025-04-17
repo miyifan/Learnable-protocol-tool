@@ -553,20 +553,61 @@ class ProtocolManager:
         
         protocol_id = protocol_data.get("protocol_id_hex", "")
         protocol_name = protocol_data.get("name", "")
+        original_name = protocol_data.get("original_name", protocol_name)  # 获取原始名称
+        protocol_type = protocol_data.get("type", "protocol")
+        
+        print(f"更新{'协议' if protocol_type == 'protocol' else '命令'}: {protocol_name} (ID: {protocol_id})")
+        if original_name != protocol_name:
+            print(f"名称已变更：{original_name} -> {protocol_name}")
         
         if not protocol_id or not protocol_name:
             return False, "协议ID和名称不能为空"
-            
+        
         # 查找并更新协议
+        found = False
+        
+        # 遍历协议字典
         for key, protocol in self.protocols.items():
-            if isinstance(protocol, dict) and protocol.get("protocol_id_hex") == protocol_id:
+            # 使用原始名称和ID进行匹配
+            if (isinstance(protocol, dict) and 
+                protocol.get("protocol_id_hex") == protocol_id and 
+                protocol.get("name") == original_name):
+                
                 # 更新协议
                 self.protocols[key] = protocol_data
+                found = True
+                print(f"在protocols中找到并更新: {key}")
+                break
+        
+        # 如果是命令类型，还需要在protocol_commands中查找和更新
+        if protocol_type == "command":
+            parent_protocol_name = protocol_data.get("protocol_name", "")
+            
+            if parent_protocol_name in self.protocol_commands and protocol_id in self.protocol_commands[parent_protocol_name]:
+                commands_list = self.protocol_commands[parent_protocol_name][protocol_id]
                 
-                # 保存到文件
-                return self.save_protocol(protocol_data)
-                
-        return False, f"未找到要更新的协议: {protocol_name} (ID: {protocol_id})"
+                if isinstance(commands_list, list):
+                    # 在列表中查找匹配原始名称的命令
+                    for i, cmd in enumerate(commands_list):
+                        if isinstance(cmd, dict) and cmd.get("name") == original_name:
+                            # 更新命令
+                            commands_list[i] = protocol_data
+                            found = True
+                            print(f"在protocol_commands中找到并更新: {parent_protocol_name}/{protocol_id}/{original_name}")
+                            break
+                elif isinstance(commands_list, dict) and commands_list.get("name") == original_name:
+                    # 直接更新字典
+                    self.protocol_commands[parent_protocol_name][protocol_id] = protocol_data
+                    found = True
+                    print(f"在protocol_commands中找到并更新字典: {parent_protocol_name}/{protocol_id}")
+        
+        # 保存到文件
+        if found:
+            return self.save_protocol(protocol_data)
+        else:
+            print(f"未找到要更新的{'协议' if protocol_type == 'protocol' else '命令'}, 将作为新项保存")
+            # 如果找不到匹配的项，作为新项保存
+            return self.save_protocol(protocol_data)
     
     def get_protocol_commands(self, protocol_name):
         """获取指定协议的所有命令"""

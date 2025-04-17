@@ -429,6 +429,7 @@ class ProtocolEditor(tk.Toplevel):
         self.protocol_name_var = tk.StringVar()
         self.protocol_id_var = tk.StringVar()
         self.description_var = tk.StringVar()
+        self.follow_var = tk.StringVar()
         
         # 当前选中的协议/命令对象
         self.selected_protocol = None
@@ -458,14 +459,9 @@ class ProtocolEditor(tk.Toplevel):
         # 处理窗口关闭事件
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         
-        # 如果有预先选择的协议，选中它
+        # 如果有预选的协议键，可以等待界面更新后再选择
         if self.protocol_key:
-            self._select_protocol(self.protocol_key)
-            
-            # 如果需要高亮字段
-            if self.highlight_field and len(self.highlight_field) == 2:
-                start_pos, end_pos = self.highlight_field
-                self._highlight_byte_range(start_pos, end_pos)
+            self.after(100, lambda: self._try_select_protocol_by_key(self.protocol_key))
 
     def _create_widgets(self):
         """创建界面元素"""
@@ -624,7 +620,7 @@ class ProtocolEditor(tk.Toplevel):
             return
             
         # 打开字段定义对话框
-        ProtocolFieldDialog(self, self.selected_protocol, callback=self._field_callback)
+        ProtocolFieldDialog(self, protocol_obj=self.selected_protocol, callback=self._field_callback)
     
     def _edit_protocol_field(self):
         """编辑字段"""
@@ -645,7 +641,7 @@ class ProtocolEditor(tk.Toplevel):
         for i, field in enumerate(self.selected_protocol['fields']):
             if field.get('name') == field_name:
                 # 打开字段编辑对话框，传递字段索引
-                ProtocolFieldDialog(self, self.selected_protocol, 
+                ProtocolFieldDialog(self, protocol_obj=self.selected_protocol, 
                                 field_data=field,
                                 field_index=i,
                                 callback=self._field_callback)
@@ -882,9 +878,10 @@ class ProtocolEditor(tk.Toplevel):
                 if protocol_name and protocol_name not in added_protocols:
                     # 在列表中显示带前缀的名称
                     self.protocol_list.insert(tk.END, f"协议: {protocol_name}")
-                    # 但在selected_protocols中保存原始名称
+                    # 在selected_protocols中保存协议名称
                     self.selected_protocols.append(protocol_name)
                     added_protocols.add(protocol_name)
+                    print(f"添加协议到列表: {protocol_name}")
         
         # 然后为每个协议添加其命令
         for protocol in protocols:
@@ -920,30 +917,46 @@ class ProtocolEditor(tk.Toplevel):
                     if isinstance(command, dict) and command.get('type') == 'command':
                         command_name = command.get('name', '')
                         command_id = command.get('protocol_id_hex', '')
-                        command_key = f"{command_name}_{command_id}"
+                        display_key = f"{command_name}_{command_id}"
                         
                         # 如果这个命令还没添加过，就添加它
-                        if command_key not in added_commands:
+                        if display_key not in added_commands:
                             # 在列表中显示带前缀的名称
                             self.protocol_list.insert(tk.END, f"命令: {command_name}")
-                            # 但在selected_protocols中保存原始名称
+                            # 在selected_protocols中保存命令名称
                             self.selected_protocols.append(command_name)
-                            added_commands.add(command_key)
+                            added_commands.add(display_key)
                             print(f"添加命令到列表: {command_name} (ID: {command_id})")
                     else:
                         # 如果不是字典类型或不是命令类型，跳过
                         print(f"跳过非命令对象: {type(command)}")
                         
-        # 如果打开时指定了协议键，通过选中列表项的方式激活它 - 这部分移到了__init__方法中，在这里删除
-        # if hasattr(self, 'protocol_key') and self.protocol_key:
-        #     self._select_protocol(self.protocol_key)
-        #     
-        #     # 如果需要高亮字段
-        #     if self.highlight_field and len(self.highlight_field) == 2:
-        #         start_pos, end_pos = self.highlight_field
-        #         self._highlight_byte_range(start_pos, end_pos)
-         
-        # 显示窗口并等待关闭
+        # 如果打开时指定了协议键，通过选中列表项的方式激活它
+        if hasattr(self, 'protocol_key') and self.protocol_key:
+            self._try_select_protocol_by_key(self.protocol_key)
+
+    def _try_select_protocol_by_key(self, key):
+        """尝试根据键选择协议"""
+        # 在selected_protocols中查找匹配的键
+        if key in self.selected_protocols:
+            index = self.selected_protocols.index(key)
+            self.protocol_list.selection_clear(0, tk.END)
+            self.protocol_list.selection_set(index)
+            self.protocol_list.see(index)
+            self._on_select(None)  # 触发选择事件
+            return True
+        
+        # 如果没找到，尝试在名称中匹配
+        for i, stored_key in enumerate(self.selected_protocols):
+            if key in stored_key:
+                self.protocol_list.selection_clear(0, tk.END)
+                self.protocol_list.selection_set(i)
+                self.protocol_list.see(i)
+                self._on_select(None)  # 触发选择事件
+                return True
+        
+        print(f"无法找到匹配的协议键: {key}")
+        return False
 
     def _select_protocol(self, protocol_key, is_command=False):
         """选择指定的协议或命令"""
@@ -1397,13 +1410,41 @@ class ProtocolEditor(tk.Toplevel):
             return
         
         index = self.protocol_list.curselection()[0]
+        if index >= len(self.selected_protocols):
+            print(f"错误：选择的索引{index}超出范围，列表长度为{len(self.selected_protocols)}")
+            return
+        
         protocol_key = self.selected_protocols[index]
         
-        # 获取协议信息
+        # 获取列表中选中项的文本，判断是协议还是命令
+        item_text = self.protocol_list.get(index)
+        is_command = item_text.startswith("命令: ")
+        
+        print(f"选中项: {item_text}, 键: {protocol_key}, 是否是命令: {is_command}")
+        
+        # 从文本中提取实际名称
+        item_name = ""
+        if ": " in item_text:
+            item_name = item_text.split(": ", 1)[1].strip()
+        
+        # 获取协议信息 - 先尝试直接使用存储的键
         protocol_data = self.protocol_manager.get_protocol_by_key(protocol_key)
         
+        # 如果找不到，尝试使用从文本中提取的名称
+        if not protocol_data and item_name:
+            print(f"使用文本名称查找协议: {item_name}")
+            protocol_data = self.protocol_manager.get_protocol_by_key(item_name)
+        
         if protocol_data:
-            # 设置协议信息
+            print(f"获取到协议数据: {protocol_data}")
+            
+            # 清除旧值
+            self.protocol_name_var.set("")
+            self.protocol_id_var.set("")
+            self.description_var.set("")
+            self.follow_var.set("")
+            
+            # 设置新值
             self.protocol_name_var.set(protocol_data.get('name', ''))
             self.protocol_id_var.set(protocol_data.get('protocol_id_hex', ''))
             self.description_var.set(protocol_data.get('description', ''))
@@ -1432,12 +1473,13 @@ class ProtocolEditor(tk.Toplevel):
                 self.follow_frame.pack_forget()
                 self.follow_var.set("")
             
-            # 加载字段
-            self._update_fields_tree()
-            
             # 保存当前选中的协议
             self.selected_protocol = protocol_data
             self.selected_protocol_key = protocol_key
+            self.selected_is_command = (protocol_type == 'command')
+            
+            # 加载字段
+            self._update_fields_tree()
         else:
             # 清空信息
             self.protocol_name_var.set('')
@@ -1451,6 +1493,10 @@ class ProtocolEditor(tk.Toplevel):
             # 清除当前选中的协议
             self.selected_protocol = None
             self.selected_protocol_key = None
+            self.selected_is_command = False
+            
+            print(f"未找到协议数据: {protocol_key}")
+            messagebox.showwarning("警告", f"无法获取协议数据: {item_name or protocol_key}")
 
     def _update_fields_tree(self):
         """更新字段表格显示"""
@@ -1516,10 +1562,10 @@ class ProtocolEditor(tk.Toplevel):
 class ProtocolFieldDialog(tk.Toplevel):
     """协议字段编辑对话框"""
     
-    def __init__(self, parent, protocol, field_data=None, callback=None, field_index=None, is_header=False):
+    def __init__(self, parent, protocol_obj, field_data=None, callback=None, field_index=None, is_header=False):
         super().__init__(parent)
         self.parent = parent
-        self.protocol = protocol
+        self.protocol_obj = protocol_obj
         self.field_data = field_data or {}
         self.callback = callback
         self.field_index = field_index
@@ -1537,6 +1583,9 @@ class ProtocolFieldDialog(tk.Toplevel):
         # 如果是编辑现有字段，填充数据
         if not self.is_new and self.field_data:
             self._populate_field_data()
+        # 如果是新建字段，且传入了选中范围，填充起始和结束位置
+        elif self.is_new and isinstance(self.field_data, dict) and 'start' in self.field_data and 'end' in self.field_data:
+            self._populate_selection_range()
         
         # 模态对话框
         self.grab_set()
@@ -1584,11 +1633,12 @@ class ProtocolFieldDialog(tk.Toplevel):
         
         # 创建字节序选择
         tk.Label(self, text="字节序:").grid(row=5, column=0, sticky="w", padx=10, pady=5)
-        self.endian_var = tk.StringVar(value="little")
+        self.endian_var = tk.StringVar(value="big")
         endian_frame = tk.Frame(self)
         endian_frame.grid(row=5, column=1, sticky="w", padx=10, pady=5)
-        tk.Radiobutton(endian_frame, text="小端序", variable=self.endian_var, value="little").pack(side=tk.LEFT)
         tk.Radiobutton(endian_frame, text="大端序", variable=self.endian_var, value="big").pack(side=tk.LEFT)
+        tk.Radiobutton(endian_frame, text="小端序", variable=self.endian_var, value="little").pack(side=tk.LEFT)
+        
         
         # 创建描述文本输入
         tk.Label(self, text="描述:").grid(row=6, column=0, sticky="nw", padx=10, pady=5)
@@ -1730,8 +1780,8 @@ class ProtocolFieldDialog(tk.Toplevel):
             return
         
         # 检查字段名称是否已存在（新建字段时）
-        if self.is_new and self.protocol:
-            fields = self.protocol.get('fields', []) if not self.is_header else self.protocol.get('header_fields', [])
+        if self.is_new and self.protocol_obj:
+            fields = self.protocol_obj.get('fields', []) if not self.is_header else self.protocol_obj.get('header_fields', [])
             for field in fields:
                 if field.get('name') == field_name:
                     messagebox.showerror("错误", f"字段名称 '{field_name}' 已存在")
@@ -1749,6 +1799,7 @@ class ProtocolFieldDialog(tk.Toplevel):
         
         # 计算字段长度
         field_length = end_pos - start_pos + 1
+        field_data["length"] = field_length
         
         # 对于非uXX类型和iXX类型字段，在类型后面加上字节数
         if not field_type.startswith('u') and not field_type.startswith('i'):
@@ -1765,9 +1816,9 @@ class ProtocolFieldDialog(tk.Toplevel):
         
         # 回调处理
         if self.callback:
-            action = "update_field" if not self.is_new else "add_field"
+            operation = "edit" if not self.is_new else "add"
             callback_data = {
-                "action": action,
+                "operation": operation,
                 "field_data": field_data,
                 "is_header": self.is_header
             }
@@ -1799,3 +1850,38 @@ class ProtocolFieldDialog(tk.Toplevel):
         y = (self.winfo_screenheight() // 2) - (height // 2)
         self.geometry(f'+{x}+{y}')
         self.focus_set()
+    
+    def _populate_selection_range(self):
+        """填充选中的字节范围到起始和结束位置"""
+        if not self.field_data or not isinstance(self.field_data, dict):
+            return
+            
+        # 获取选中范围的起始和结束位置
+        start_pos = self.field_data.get('start')
+        end_pos = self.field_data.get('end')
+        
+        if start_pos is not None and end_pos is not None:
+            # 设置起始和结束位置
+            self.start_pos_var.set(str(start_pos))
+            self.end_pos_var.set(str(end_pos))
+            
+            # 计算字段长度
+            self._calculate_length()
+            
+            # 根据长度自动选择适合的类型
+            length = end_pos - start_pos + 1
+            self._suggest_field_type(length)
+        
+    def _suggest_field_type(self, length):
+        """根据字段长度建议适当的类型"""
+        if length == 1:
+            self.type_var.set("u8")
+        elif length == 2:
+            self.type_var.set("u16")
+        elif length == 4:
+            self.type_var.set("u32")
+        elif length == 8:
+            self.type_var.set("u64")
+        else:
+            # 对于其他长度，建议使用字节数组
+            self.type_var.set(f"char.{length}")

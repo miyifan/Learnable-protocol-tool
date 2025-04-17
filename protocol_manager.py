@@ -1209,7 +1209,7 @@ class ProtocolManager:
             "bool"
         ]
     
-    def add_protocol_field(self, protocol_key, field_name, field_type, start_pos, field_length):
+    def add_protocol_field(self, protocol_key, field_name, field_type, start_pos, field_length, description=""):
         """添加协议字段"""
         protocol = self.get_protocol_by_key(protocol_key)
         if not protocol:
@@ -1243,7 +1243,8 @@ class ProtocolManager:
             'type': field_type,
             'start_pos': start_pos,
             'end_pos': end_pos,
-            'endian': 'little'  # 默认使用小端序
+            'endian': 'little',  # 默认使用小端序
+            'description': description  # 添加描述字段
         }
         protocol['fields'].append(new_field)
         
@@ -1265,7 +1266,7 @@ class ProtocolManager:
             protocol['fields'] = []
         
         # 检查字段索引是否有效
-        if field_index < 0 or field_index >= len(protocol['fields']):
+        if field_index < 0 or field_index > len(protocol['fields']):
             return False, f"字段更新失败: 无效的字段索引 {field_index}"
         
         # 获取字段类型和位置
@@ -1293,7 +1294,13 @@ class ProtocolManager:
         
         # 更新字段数据
         field_data['type'] = field_type
-        protocol['fields'][field_index] = field_data
+        
+        # 如果字段索引等于字段列表长度，表示添加新字段到末尾
+        if field_index == len(protocol['fields']):
+            protocol['fields'].append(field_data)
+        else:
+            # 否则更新现有字段
+            protocol['fields'][field_index] = field_data
         
         # 保存更新后的协议
         success, message = self.save_protocol(protocol)

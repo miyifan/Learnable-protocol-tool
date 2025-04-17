@@ -975,7 +975,12 @@ class HexParserTool:
             pass
     
     def _get_selected_byte_range(self):
-        """获取当前选中的字节范围"""
+        """获取当前选中的字节范围
+        
+        返回:
+            dict: 包含起始位置和结束位置的字典 {'start': int, 'end': int}
+            None: 如果没有选中任何字节
+        """
         # 如果有文本选择，尝试解析其字节范围
         try:
             selection_range = self.output_text.tag_ranges("selection")
@@ -990,10 +995,10 @@ class HexParserTool:
             start_line, start_col = map(int, str(start).split('.'))
             end_line, end_col = map(int, str(end).split('.'))
             
-            # 获取所有可见行的文本内容，提取每行的偏移量
+            # 获取每行显示的字节数
             bytes_per_line = self.bytes_per_line.get()
             
-            # 更精确地获取每行的实际偏移量
+            # 获取所有可见行的文本内容，提取每行的偏移量
             all_lines = self.output_text.get("1.0", tk.END).split('\n')
             line_offsets = []
             
@@ -1019,19 +1024,44 @@ class HexParserTool:
             
             # 计算起始位置和结束位置对应的实际字节偏移
             if start_line <= len(line_offsets):
-                # 计算当前行内的偏移量
-                start_byte_in_line = (start_col - 6) // 3
+                # 计算当前行内的偏移量，考虑十六进制部分的开始位置（通常在第6列）
+                hex_start_col = 6  # 默认十六进制部分从第6列开始
+                # 检查当前行，确定实际的十六进制起始列
+                if start_line <= len(all_lines):
+                    line_text = all_lines[start_line - 1]
+                    if ":" in line_text:
+                        hex_start_col = line_text.find(':') + 1
+                        while hex_start_col < len(line_text) and line_text[hex_start_col] == ' ':
+                            hex_start_col += 1
+                            
+                # 计算在十六进制部分的列位置
+                col_in_hex = start_col - hex_start_col
+                # 每个字节占3列（2个字符+1个空格），所以除以3得到字节位置
+                start_byte_in_line = col_in_hex // 3
+                # 确保不为负
+                start_byte_in_line = max(0, start_byte_in_line)
                 # 总偏移量 = 行偏移量 + 行内偏移量
                 start_byte = line_offsets[start_line - 1] + start_byte_in_line
             else:
                 return None
             
             if end_line <= len(line_offsets):
-                # 计算当前行内的偏移量
-                end_byte_in_line = (end_col - 6) // 3
+                # 对结束位置也做同样处理
+                hex_start_col = 6
+                if end_line <= len(all_lines):
+                    line_text = all_lines[end_line - 1]
+                    if ":" in line_text:
+                        hex_start_col = line_text.find(':') + 1
+                        while hex_start_col < len(line_text) and line_text[hex_start_col] == ' ':
+                            hex_start_col += 1
+                            
+                col_in_hex = end_col - hex_start_col
+                end_byte_in_line = col_in_hex // 3
                 # 如果选择刚好在字节边界结束(落在空格上)，需要减1
-                if (end_col - 6) % 3 == 0:
+                if col_in_hex % 3 == 0 and col_in_hex > 0:
                     end_byte_in_line -= 1
+                # 确保不为负
+                end_byte_in_line = max(0, end_byte_in_line)
                 # 总偏移量 = 行偏移量 + 行内偏移量
                 end_byte = line_offsets[end_line - 1] + end_byte_in_line
             else:
@@ -1040,10 +1070,13 @@ class HexParserTool:
             # 确保结束位置不小于起始位置
             end_byte = max(start_byte, end_byte)
             
+            print(f"选中字节范围: 起始={start_byte}, 结束={end_byte}, 长度={end_byte - start_byte + 1}")
             return {'start': start_byte, 'end': end_byte}
         
         except Exception as e:
             print(f"获取选择范围出错: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def _on_bytes_per_line_change(self):
@@ -1656,11 +1689,11 @@ class HexParserTool:
             return
         
         # 打开字段定义对话框，传递命令数据而不是协议数据
-        ProtocolFieldDialog(self.root, command_data, selection, self._field_callback)
+        ProtocolFieldDialog(self.root, protocol_obj=command_data, field_data=selection, callback=self._field_callback)
     
     def _field_callback(self, data):
         """处理协议字段对话框的回调"""
-        if not data or 'action' not in data:
+        if not data or 'operation' not in data:
             return {'success': False, 'message': '无效的操作'}
         
         # 检查是否选择了命令
@@ -1695,23 +1728,37 @@ class HexParserTool:
         message = ""
         
         try:
-            if data['action'] == 'add_field':
+            if data['operation'] == 'add':
                 if 'field_data' in data:
                     field_data = data['field_data']
                     field_name = field_data.get('name', '')
                     field_type = field_data.get('type', '')
                     start_pos = field_data.get('start_pos', 0)
                     end_pos = field_data.get('end_pos', 0)
+                    description = field_data.get('description', '')
                     
                     print(f"添加字段到命令 {command_key}: {field_name}")
-                    print(f"字段信息: 类型={field_type}, 起始位置={start_pos}, 结束位置={end_pos}")
+                    print(f"字段信息: 类型={field_type}, 起始位置={start_pos}, 结束位置={end_pos}, 描述={description}")
                     
                     # 计算长度作为第四个参数
                     field_length = end_pos - start_pos + 1
                     
-                    # 使用add_protocol_field方法添加字段
-                    success, message = self.protocol_manager.add_protocol_field(
-                        command_key, field_name, field_type, start_pos, field_length)
+                    # 创建包含完整信息的字段数据
+                    complete_field_data = {
+                        'name': field_name,
+                        'type': field_type,
+                        'start_pos': start_pos,
+                        'end_pos': end_pos,
+                        'description': description,
+                        'endian': field_data.get('endian', 'little')
+                    }
+                    
+                    # 使用update_protocol_field方法添加字段
+                    success, message = self.protocol_manager.update_protocol_field(
+                        command_key, 
+                        len(command_data.get('fields', [])),  # 添加到末尾
+                        complete_field_data
+                    )
                     
                     # 刷新当前命令数据
                     if success:
@@ -1733,7 +1780,7 @@ class HexParserTool:
                     
                     return {'success': success, 'message': message}
                     
-            elif data['action'] == 'update_field':
+            elif data['operation'] == 'edit':
                 if 'field_data' in data and 'field_index' in data:
                     field_index = data['field_index']
                     field_data = data['field_data']
@@ -1763,7 +1810,7 @@ class HexParserTool:
                     
                     return {'success': success, 'message': message}
             
-            elif data['action'] == 'delete_field':
+            elif data['operation'] == 'delete':
                 if 'field_index' in data:
                     print(f"从命令 {command_key} 中删除字段，索引: {data['field_index']}")
                     success, message = self.protocol_manager.remove_protocol_field(
@@ -1791,6 +1838,8 @@ class HexParserTool:
         except Exception as e:
             error_message = f"字段操作异常: {str(e)}"
             print(error_message)
+            import traceback
+            traceback.print_exc()
             return {'success': False, 'message': error_message}
         
         return {'success': False, 'message': '未知操作'}

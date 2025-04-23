@@ -1862,7 +1862,7 @@ class HexParserTool:
         # 创建协议选择对话框
         dialog = tk.Toplevel(self.root)
         dialog.title("生成协议文档")
-        dialog.geometry("400x300")
+        dialog.geometry("400x220")
         dialog.transient(self.root)
         dialog.grab_set()
         
@@ -1873,15 +1873,20 @@ class HexParserTool:
         ttk.Label(protocol_frame, text="选择协议:").pack(anchor=tk.W, pady=(0, 5))
         
         # 协议选择变量
-        selected_protocol = tk.StringVar(value="所有协议")
+        selected_protocol = tk.StringVar()
         
         # 获取所有协议名称列表
-        protocol_list = ["所有协议"]  # 默认选项
+        protocol_list = []  # 移除"所有协议"选项
         for protocol in self.protocol_manager.protocols.values():
             if protocol.get('type', '') == 'protocol':
                 name = protocol.get('name', '')
                 if name and name not in protocol_list:
                     protocol_list.append(name)
+        
+        if not protocol_list:
+            messagebox.showinfo("提示", "没有可用的协议，请先添加协议")
+            dialog.destroy()
+            return
         
         # 创建协议选择下拉框
         protocol_combobox = ttk.Combobox(
@@ -1892,38 +1897,42 @@ class HexParserTool:
             state="readonly"
         )
         protocol_combobox.pack(fill=tk.X, pady=(0, 10))
-        protocol_combobox.current(0)  # 默认选择"所有协议"
+        protocol_combobox.current(0)  # 默认选择第一个协议
         
-        # 文档格式选择区域
+        # 文档格式选择区域 - 只保留Word文档选项
         format_frame = ttk.Frame(dialog, padding=10)
         format_frame.pack(fill=tk.X, expand=False)
         
-        ttk.Label(format_frame, text="选择输出格式:").pack(anchor=tk.W, pady=(0, 5))
+        ttk.Label(format_frame, text="输出格式:").pack(anchor=tk.W, pady=(0, 5))
         
-        formats = ["Word文档(.docx)", "Excel表格(.xlsx)"]
-        selected_format = tk.StringVar(value=formats[0])
-        
-        for fmt in formats:
-            ttk.Radiobutton(format_frame, text=fmt, variable=selected_format, value=fmt).pack(anchor=tk.W, pady=2)
+        # 固定使用Word文档格式
+        format_label = ttk.Label(format_frame, text="Word文档(.docx)")
+        format_label.pack(anchor=tk.W, pady=2)
         
         # 处理生成文档
         def on_generate():
             try:
-                fmt = selected_format.get()
-                output_format = "docx" if "Word" in fmt else "xlsx"
-                    
                 protocol_name = selected_protocol.get()
+                
+                # 检查是否选择了协议
+                if not protocol_name:
+                    messagebox.showwarning("警告", "请选择一个协议")
+                    return
+                
                 protocol_key = None
                 
                 # 根据选择的协议名称找到对应的协议键
-                if protocol_name != "所有协议":
-                    for key, protocol in self.protocol_manager.protocols.items():
-                        if protocol.get('type', '') == 'protocol' and protocol.get('name', '') == protocol_name:
-                            protocol_key = key
-                            break
+                for key, protocol in self.protocol_manager.protocols.items():
+                    if protocol.get('type', '') == 'protocol' and protocol.get('name', '') == protocol_name:
+                        protocol_key = key
+                        break
                 
-                # 生成文档
-                success, message = self.protocol_manager.generate_protocol_doc(protocol_key, output_format)
+                if not protocol_key:
+                    messagebox.showwarning("警告", f"找不到协议: {protocol_name}")
+                    return
+                
+                # 生成文档，固定使用docx格式
+                success, message = self.protocol_manager.generate_protocol_doc(protocol_key, "docx")
                 
                 dialog.destroy()
                 

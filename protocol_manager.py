@@ -1,8 +1,9 @@
 # protocol_manager.py - 协议管理和存储模块
 import os
 import json
-from pathlib import Path
+import glob
 import struct
+from pathlib import Path
 import copy
 
 class ProtocolManager:
@@ -628,7 +629,18 @@ class ProtocolManager:
                     print(f"命令是列表，包含 {len(command_list)} 个命令")
                     for cmd in command_list:
                         if isinstance(cmd, dict):
-                            cmd_id = cmd.get('protocol_id_hex', '')
+                            # 确保命令中包含command_id_hex
+                            if 'command_id_hex' not in cmd and 'protocol_id_hex' in cmd:
+                                cmd['command_id_hex'] = cmd['protocol_id_hex']
+                                
+                            # 确保命令中包含command_id_dec
+                            if 'command_id_dec' not in cmd and 'command_id_hex' in cmd:
+                                try:
+                                    cmd['command_id_dec'] = str(int(cmd['command_id_hex'], 16))
+                                except:
+                                    cmd['command_id_dec'] = ""
+                                    
+                            cmd_id = cmd.get('command_id_hex', '')
                             cmd_name = cmd.get('name', '')
                             cmd_key = f"{cmd_name}_{cmd_id}"
                             
@@ -642,7 +654,19 @@ class ProtocolManager:
                             print(f"忽略非字典命令: {type(cmd)}")
                 elif isinstance(command_list, dict):
                     print(f"命令是字典，添加单个命令: {command_list.get('name', 'unnamed')}")
-                    cmd_id = command_list.get('protocol_id_hex', '')
+                    
+                    # 确保命令中包含command_id_hex
+                    if 'command_id_hex' not in command_list and 'protocol_id_hex' in command_list:
+                        command_list['command_id_hex'] = command_list['protocol_id_hex']
+                        
+                    # 确保命令中包含command_id_dec
+                    if 'command_id_dec' not in command_list and 'command_id_hex' in command_list:
+                        try:
+                            command_list['command_id_dec'] = str(int(command_list['command_id_hex'], 16))
+                        except:
+                            command_list['command_id_dec'] = ""
+                            
+                    cmd_id = command_list.get('command_id_hex', '')
                     cmd_name = command_list.get('name', '')
                     
                     # 确保命令有必要的属性
@@ -671,7 +695,19 @@ class ProtocolManager:
                 
             if (protocol.get('type') == 'command' and 
                 protocol.get('protocol_name') == protocol_name):
-                cmd_id = protocol.get('protocol_id_hex', '')
+                
+                # 确保命令中包含command_id_hex
+                if 'command_id_hex' not in protocol and 'protocol_id_hex' in protocol:
+                    protocol['command_id_hex'] = protocol['protocol_id_hex']
+                    
+                # 确保命令中包含command_id_dec
+                if 'command_id_dec' not in protocol and 'command_id_hex' in protocol:
+                    try:
+                        protocol['command_id_dec'] = str(int(protocol['command_id_hex'], 16))
+                    except:
+                        protocol['command_id_dec'] = ""
+                        
+                cmd_id = protocol.get('command_id_hex', '')
                 cmd_name = protocol.get('name', '')
                 
                 # 确保命令有必要的属性
@@ -692,7 +728,339 @@ class ProtocolManager:
         print(f"在protocols中找到 {command_count} 个命令")
         print(f"总共找到 {len(commands)} 个命令")
         
+        # 确保所有命令都有command_id_hex和command_id_dec
+        for cmd in commands:
+            if isinstance(cmd, dict):
+                # 确保命令中包含command_id_hex
+                if 'command_id_hex' not in cmd and 'protocol_id_hex' in cmd:
+                    cmd['command_id_hex'] = cmd['protocol_id_hex']
+                    
+                # 确保命令中包含command_id_dec
+                if 'command_id_dec' not in cmd and 'command_id_hex' in cmd:
+                    try:
+                        cmd['command_id_dec'] = str(int(cmd['command_id_hex'], 16))
+                    except:
+                        cmd['command_id_dec'] = ""
+        
         return commands
+    
+    def generate_protocol_doc(self, protocol_key, output_format="docx"):
+        """生成协议文档
+        
+        参数:
+            protocol_key: 协议键，必须提供有效的协议key
+            output_format: 输出格式，仅支持"docx"
+            
+        返回:
+            success: 是否成功
+            message: 成功或失败信息
+        """
+        try:
+            # 检查参数
+            if not protocol_key or protocol_key == "all":
+                return False, "必须提供有效的协议键，不支持导出所有协议"
+                
+            if output_format != "docx":
+                return False, "仅支持docx格式导出"
+                
+            import os
+            from datetime import datetime
+            
+            # 加载docx库
+            try:
+                from docx import Document
+                from docx.shared import Pt, Inches, RGBColor
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                from docx.oxml.ns import qn
+            except ImportError:
+                return False, "未安装python-docx库，请使用pip install python-docx安装"
+            
+            # 获取协议数据
+            protocol = self.get_protocol_by_key(protocol_key)
+            if not protocol:
+                return False, f"未找到协议: {protocol_key}"
+                
+            # 创建Word文档
+            doc = Document()
+            
+            # 设置全文字体为微软雅黑
+            style = doc.styles['Normal']
+            style.font.name = '微软雅黑'
+            style.font.size = Pt(10)
+            # 设置中文字体
+            style._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+            
+            # 设置标题字体也为微软雅黑
+            for i in range(1, 10):
+                if f'Heading {i}' in doc.styles:
+                    heading_style = doc.styles[f'Heading {i}']
+                    heading_style.font.name = '微软雅黑'
+                    heading_style.font.size = Pt(14 - i)  # 标题大小逐级递减
+                    heading_style._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+            
+            # 设置标题
+            title = doc.add_heading('协议文档', level=0)
+            title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            # 添加生成时间
+            time_para = doc.add_paragraph(f'生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+            time_para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            doc.add_paragraph('')
+            
+            # 处理协议
+            protocol_name = protocol.get("name", "未命名")
+            protocol_id_hex = protocol.get("protocol_id_hex", "")
+            protocol_id_dec = protocol.get("protocol_id_dec", "")
+            
+            # ===== 第一部分：协议头定义 =====
+            doc.add_heading(f'一、协议头定义: {protocol_name}', level=1)
+            
+            # 协议基本信息
+            doc.add_paragraph(f'ID: 0x{protocol_id_hex} (十进制: {protocol_id_dec})')
+            doc.add_paragraph(f'描述: {protocol.get("description", "无")}')
+            doc.add_paragraph(f'类型: {protocol.get("type", "未知")}')
+            
+            # 添加协议头字段表格
+            if 'fields' in protocol and protocol['fields']:
+                doc.add_heading('协议头字段定义', level=2)
+                
+                # 创建表格
+                table = doc.add_table(rows=1, cols=5)
+                table.style = 'Table Grid'
+                
+                # 设置表头
+                header_cells = table.rows[0].cells
+                header_cells[0].text = '字段名称'
+                header_cells[1].text = '类型'
+                header_cells[2].text = '起始位置'
+                header_cells[3].text = '结束位置'
+                header_cells[4].text = '描述'
+                
+                # 设置表头格式
+                for cell in header_cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.bold = True
+                            run.font.name = '微软雅黑'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                
+                # 添加字段行
+                for field in sorted(protocol['fields'], key=lambda f: f.get('start_pos', 0)):
+                    row_cells = table.add_row().cells
+                    row_cells[0].text = field.get('name', '')
+                    row_cells[1].text = field.get('type', '')
+                    row_cells[2].text = str(field.get('start_pos', ''))
+                    row_cells[3].text = str(field.get('end_pos', ''))
+                    row_cells[4].text = field.get('description', '')
+                    
+                    # 设置单元格字体
+                    for cell in row_cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                run.font.name = '微软雅黑'
+                                run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+            else:
+                doc.add_paragraph('此协议没有定义头字段')
+            
+            # ===== 第二部分：命令ID列表 =====
+            commands = self.get_protocol_commands(protocol_name)
+            doc.add_heading('二、命令ID列表', level=1)
+            
+            if commands:
+                # 创建命令ID表格
+                id_table = doc.add_table(rows=1, cols=3)
+                id_table.style = 'Table Grid'
+                
+                # 设置表头
+                header_cells = id_table.rows[0].cells
+                header_cells[0].text = '命令ID (十六进制)'
+                header_cells[1].text = '命令ID (十进制)'
+                header_cells[2].text = '命令名称'
+                
+                # 设置表头格式
+                for cell in header_cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.bold = True
+                            run.font.name = '微软雅黑'
+                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                
+                # 按命令ID排序（确保十六进制ID正确转换为整数进行排序）
+                sorted_commands = sorted(commands, key=lambda cmd: int(cmd.get('command_id_hex', '0'), 16) if cmd.get('command_id_hex', '').strip() else 0)
+                
+                # 添加命令ID行
+                for command in sorted_commands:
+                    if isinstance(command, dict) and command.get('type') == 'command':
+                        cmd_id_hex = command.get('command_id_hex', '')
+                        cmd_id_dec = command.get('command_id_dec', '')
+                        if not cmd_id_dec and cmd_id_hex:
+                            try:
+                                cmd_id_dec = str(int(cmd_id_hex, 16))
+                            except:
+                                cmd_id_dec = ''
+                        
+                        row_cells = id_table.add_row().cells
+                        row_cells[0].text = f"0x{cmd_id_hex}" if cmd_id_hex else ''
+                        row_cells[1].text = cmd_id_dec
+                        row_cells[2].text = command.get('name', '未命名')
+                        
+                        # 设置单元格字体
+                        for cell in row_cells:
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    run.font.name = '微软雅黑'
+                                    run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+            else:
+                doc.add_paragraph('此协议没有定义命令')
+            
+            # ===== 第三部分：命令详细信息 =====
+            doc.add_heading('三、命令详细定义', level=1)
+            
+            if commands:
+                # 遍历命令（保持排序）
+                for command in sorted_commands:
+                    if isinstance(command, dict) and command.get('type') == 'command':
+                        # 命令标题
+                        cmd_name = command.get('name', '未命名')
+                        cmd_id_hex = command.get('command_id_hex', '')
+                        cmd_id_dec = command.get('command_id_dec', '')
+                        
+                        cmd_header = doc.add_heading(f'命令: {cmd_name}', level=2)
+                        
+                        # 命令基本信息
+                        doc.add_paragraph(f'ID: 0x{cmd_id_hex} (十进制: {cmd_id_dec})')
+                        doc.add_paragraph(f'描述: {command.get("description", "无")}')
+                        if command.get('follow', ''):
+                            doc.add_paragraph(f'Follow字段: 0x{command.get("follow", "")}')
+                        
+                        # 添加字段表格
+                        if 'fields' in command and command['fields']:
+                            doc.add_paragraph('字段定义:')
+                            
+                            # 创建表格
+                            field_table = doc.add_table(rows=1, cols=5)
+                            field_table.style = 'Table Grid'
+                            
+                            # 设置表头
+                            header_cells = field_table.rows[0].cells
+                            header_cells[0].text = '字段名称'
+                            header_cells[1].text = '类型'
+                            header_cells[2].text = '起始位置'
+                            header_cells[3].text = '结束位置'
+                            header_cells[4].text = '描述'
+                            
+                            # 设置表头格式
+                            for cell in header_cells:
+                                for paragraph in cell.paragraphs:
+                                    for run in paragraph.runs:
+                                        run.font.bold = True
+                                        run.font.name = '微软雅黑'
+                                        run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                            
+                            # 添加字段行
+                            for field in sorted(command['fields'], key=lambda f: f.get('start_pos', 0)):
+                                row_cells = field_table.add_row().cells
+                                row_cells[0].text = field.get('name', '')
+                                row_cells[1].text = field.get('type', '')
+                                row_cells[2].text = str(field.get('start_pos', ''))
+                                row_cells[3].text = str(field.get('end_pos', ''))
+                                row_cells[4].text = field.get('description', '')
+                                
+                                # 设置单元格字体
+                                for cell in row_cells:
+                                    for paragraph in cell.paragraphs:
+                                        for run in paragraph.runs:
+                                            run.font.name = '微软雅黑'
+                                            run._element.rPr.rFonts.set(qn('w:eastAsia'), '微软雅黑')
+                        else:
+                            doc.add_paragraph('此命令没有定义字段')
+                        
+                        # 添加分隔符
+                        doc.add_paragraph('')
+            else:
+                doc.add_paragraph('此协议没有定义命令')
+            
+            # 保存文档
+            output_dir = "protocol_docs"
+            os.makedirs(output_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            protocol_name = protocol.get('name', 'protocol')
+            filename = f"{output_dir}/{protocol_name}_protocol_doc_{timestamp}.docx"
+            
+            doc.save(filename)
+            return True, f"协议文档已保存到: {filename}"
+                
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return False, f"生成协议文档时出错: {str(e)}"
+    
+    def _load_protocol_dir(self):
+        """加载协议目录"""
+        try:
+            # 确保协议存储目录存在
+            self.data_dir.mkdir(exist_ok=True)
+            
+            # 备份当前命令列表中的相同ID不同命令的情况
+            command_id_backup = {}
+            for protocol_name, commands in self.protocol_commands.items():
+                for command_id, cmd_list in commands.items():
+                    if isinstance(cmd_list, list) and len(cmd_list) > 1:
+                        # 有多个命令的情况，记录下来
+                        if protocol_name not in command_id_backup:
+                            command_id_backup[protocol_name] = {}
+                        command_id_backup[protocol_name][command_id] = cmd_list
+            
+            # 重新加载所有协议
+            self.protocols = {}  # 清空协议字典
+            self.commands = {}   # 清空命令字典
+            self.protocol_commands = {}  # 清空协议指令字典
+            
+            # 重新加载所有协议
+            result = self.load_all_protocols()
+            
+            # 还原之前备份的多命令情况
+            for protocol_name, commands in command_id_backup.items():
+                if protocol_name in self.protocol_commands:
+                    for command_id, cmd_list in commands.items():
+                        # 检查新加载的命令中是否已有该ID
+                        if command_id in self.protocol_commands[protocol_name]:
+                            existing_cmds = self.protocol_commands[protocol_name][command_id]
+                            # 合并命令列表，避免重复
+                            merged_list = []
+                            existing_cmd_keys = set()
+                            
+                            # 先添加现有命令
+                            if isinstance(existing_cmds, list):
+                                for cmd in existing_cmds:
+                                    if isinstance(cmd, dict):
+                                        cmd_key = f"{cmd.get('name', '')}_{cmd.get('follow', '')}"
+                                        existing_cmd_keys.add(cmd_key)
+                                        merged_list.append(cmd)
+                            elif isinstance(existing_cmds, dict):
+                                cmd = existing_cmds
+                                cmd_key = f"{cmd.get('name', '')}_{cmd.get('follow', '')}"
+                                existing_cmd_keys.add(cmd_key)
+                                merged_list.append(cmd)
+                            
+                            # 然后添加备份中的命令，避免重复
+                            for cmd in cmd_list:
+                                if isinstance(cmd, dict):
+                                    cmd_key = f"{cmd.get('name', '')}_{cmd.get('follow', '')}"
+                                    if cmd_key not in existing_cmd_keys:
+                                        merged_list.append(cmd)
+                                        existing_cmd_keys.add(cmd_key)
+                            
+                            # 更新命令列表
+                            self.protocol_commands[protocol_name][command_id] = merged_list
+                        else:
+                            # 如果新加载的命令中没有该ID，直接添加
+                            self.protocol_commands[protocol_name][command_id] = cmd_list
+            
+            return result
+        except Exception as e:
+            return False, f"加载协议目录失败: {str(e)}"
     
     def find_matching_protocol(self, hex_data):
         """根据16进制数据查找匹配的协议或命令"""
@@ -714,9 +1082,10 @@ class ProtocolManager:
         # 记录所有协议组中的命令ID
         print("\n所有协议组中的命令ID:")
         for group_name, group_commands in self.protocol_commands.items():
-            print(f"  协议组 '{group_name}' 下的命令ID: {list(group_commands.keys())}")
+            cmd_ids = list(group_commands.keys())
+            print(f"  协议组 '{group_name}' 下的命令ID: {cmd_ids}")
         
-        # 2. 从第4个字节提取命令ID并查找 - 将这部分提到前面，优先检查命令ID
+        # 2. 优先尝试匹配命令ID
         if command_id:
             print(f"\n优先尝试匹配命令ID(第4字节): {command_id}")
             
@@ -732,6 +1101,8 @@ class ProtocolManager:
             
             for group_name, group_commands in self.protocol_commands.items():
                 print(f"  检查协议组: {group_name}")
+                
+                # 检查命令ID是否在当前组中
                 if command_id in group_commands:
                     print(f"  在组 {group_name} 中找到匹配的命令ID: {command_id}")
                     commands = group_commands[command_id]
@@ -739,21 +1110,32 @@ class ProtocolManager:
                     # 如果是命令列表，尝试根据follow字段匹配
                     if isinstance(commands, list) and commands:
                         for cmd in commands:
-                            cmd_follow = cmd.get('follow', '').upper()
-                            print(f"  检查命令follow: {cmd_follow} vs 数据follow: {follow_data}")
-                            # 保存所有找到的命令
-                            matching_commands.append((cmd, cmd_follow == follow_data))
-                            
-                            # 如果follow字段完全匹配，直接返回该命令
-                            if cmd_follow == follow_data:
-                                print(f"  找到完全匹配的follow命令: {cmd.get('name', '')}")
-                                return cmd
+                            if isinstance(cmd, dict):
+                                # 确保命令中包含command_id_hex
+                                if 'command_id_hex' not in cmd and 'protocol_id_hex' in cmd:
+                                    cmd['command_id_hex'] = cmd['protocol_id_hex']
+                                
+                                cmd_follow = cmd.get('follow', '').upper()
+                                print(f"  检查命令follow: {cmd_follow} vs 数据follow: {follow_data}")
+                                # 保存所有找到的命令
+                                matching_commands.append((cmd, cmd_follow == follow_data))
+                                
+                                # 如果follow字段完全匹配，直接返回该命令
+                                if cmd_follow == follow_data:
+                                    print(f"  找到完全匹配的follow命令: {cmd.get('name', '')}")
+                                    return cmd
                     # 如果只有一个命令或没有follow数据，直接返回
                     elif isinstance(commands, list) and commands:
-                        print(f"  返回命令: {commands[0].get('name', '')}")
+                        print(f"  返回命令列表中的第一个命令: {commands[0].get('name', '')}")
+                        # 确保命令中包含command_id_hex
+                        if 'command_id_hex' not in commands[0] and 'protocol_id_hex' in commands[0]:
+                            commands[0]['command_id_hex'] = commands[0]['protocol_id_hex']
                         return commands[0]
                     elif isinstance(commands, dict):
-                        print(f"  返回命令: {commands.get('name', '')}")
+                        print(f"  返回单个命令: {commands.get('name', '')}")
+                        # 确保命令中包含command_id_hex
+                        if 'command_id_hex' not in commands and 'protocol_id_hex' in commands:
+                            commands['command_id_hex'] = commands['protocol_id_hex']
                         return commands
                 else:
                     print(f"  组 {group_name} 中未找到命令ID: {command_id}")
@@ -770,8 +1152,8 @@ class ProtocolManager:
                 print(f"  没有找到完全匹配的命令，返回第一个命令: {matching_commands[0][0].get('name', '')}")
                 return matching_commands[0][0]
         
-        # 1. 直接查找协议ID作为命令ID
-        print(f"\n尝试直接匹配协议ID作为命令ID: {protocol_id}")
+        # 1. 尝试直接查找协议ID作为命令ID
+        print(f"\n尝试将协议ID作为命令ID进行匹配: {protocol_id}")
         # 遍历所有协议组
         for group_name, group_commands in self.protocol_commands.items():
             # 检查该组中是否有匹配的命令ID
@@ -780,18 +1162,35 @@ class ProtocolManager:
                 commands = group_commands[protocol_id]
                 # 返回第一个匹配的命令
                 if isinstance(commands, list) and commands:
-                    print(f"返回命令: {commands[0].get('name', '')}")
+                    print(f"返回命令列表中的第一个命令: {commands[0].get('name', '')}")
+                    # 确保命令中包含command_id_hex
+                    if 'command_id_hex' not in commands[0] and 'protocol_id_hex' in commands[0]:
+                        commands[0]['command_id_hex'] = commands[0]['protocol_id_hex']
                     return commands[0]
                 elif isinstance(commands, dict):
-                    print(f"返回命令: {commands.get('name', '')}")
+                    print(f"返回单个命令: {commands.get('name', '')}")
+                    # 确保命令中包含command_id_hex
+                    if 'command_id_hex' not in commands and 'protocol_id_hex' in commands:
+                        commands['command_id_hex'] = commands['protocol_id_hex']
                     return commands
         
-        # 3. 在protocols字典中查找
+        # 3. 在protocols字典中查找命令和协议
         print("\n在protocols字典中查找命令...")
+        # 首先查找命令
         for protocol_key, protocol in self.protocols.items():
             if protocol.get('type') == 'command':
+                # 获取命令ID，同时检查protocol_id_hex和command_id_hex
                 protocol_id_hex = protocol.get('protocol_id_hex', '').upper()
-                if protocol_id_hex == protocol_id or protocol_id_hex == command_id:
+                command_id_hex = protocol.get('command_id_hex', '').upper()
+                
+                # 如果命令没有command_id_hex但有protocol_id_hex，则使用protocol_id_hex
+                if not command_id_hex and protocol_id_hex:
+                    command_id_hex = protocol_id_hex
+                    protocol['command_id_hex'] = protocol_id_hex
+                
+                # 匹配协议ID或命令ID
+                if (protocol_id_hex and protocol_id_hex == protocol_id) or \
+                   (command_id_hex and command_id_hex == command_id):
                     print(f"在protocols中找到匹配的命令: {protocol.get('name', '')}")
                     return protocol
         
@@ -936,23 +1335,38 @@ class ProtocolManager:
     def _convert_field_value(self, hex_data, field_type, endian='big'):
         """转换字段值为对应类型"""
         try:
-            # 处理带字节数的类型格式 (如 char.ascii.4)
+            # 打印调试信息
+            print(f"正在转换字段值: 类型={field_type}, 数据={hex_data}")
+            
+            # 处理带字节数的类型格式 (如 char.4)
             base_type = field_type
+            length_suffix = None
+            
             if '.' in field_type:
                 # 拆分类型和字节数
                 parts = field_type.split('.')
-                if len(parts) >= 2:
+                print(f"字段类型拆分: {parts}")
+                
+                # 特殊处理char类型 (原char.ascii)
+                if parts[0] == 'char':
+                    base_type = 'char'
+                    # 如果有字节数部分
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        length_suffix = parts[1]
+                        print(f"char类型，带字节数: {length_suffix}")
+                    elif len(parts) >= 3 and parts[2].isdigit():
+                        length_suffix = parts[2]
+                        print(f"char类型，带字节数: {length_suffix}")
+                else:
+                    # 处理其他类型
                     base_type = parts[0]
-                    # 如果有第三部分，它可能是字节数
-                    if len(parts) >= 3 and parts[2].isdigit():
-                        # 不需要在这里处理字节数，因为hex_data已经是正确长度
-                        pass
-                    elif len(parts) == 2 and parts[1].isdigit():
-                        # 如果第二部分是数字，则它是字节数
-                        pass
-                    else:
-                        # 否则第二部分是子类型 (如 char.ascii)
-                        base_type = f"{parts[0]}.{parts[1]}"
+                    # 如果后面有字节数
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        length_suffix = parts[1]
+                    elif len(parts) >= 3 and parts[2].isdigit():
+                        length_suffix = parts[2]
+            
+            print(f"解析后的基本类型: {base_type}, 长度后缀: {length_suffix}")
             
             # 根据基本类型处理字段
             if base_type in ['u8', 'i8', 'BYTE']:
@@ -1055,8 +1469,8 @@ class ProtocolManager:
                 except:
                     return hex_data
                     
-            elif base_type == 'char.ascii':
-                # 将16进制转换为ASCII字符串，专门用于ASCII字符解析
+            elif base_type == 'char':
+                # 将16进制转换为ASCII字符串，专门用于ASCII字符解析 (原char.ascii)
                 try:
                     # 尝试将每个字节解析为ASCII字符
                     result = []
@@ -1068,9 +1482,11 @@ class ProtocolManager:
                                 result.append(chr(byte_val))
                             else:
                                 result.append('.')  # 用点表示不可打印字符
-                    return ''.join(result)
+                    ascii_result = ''.join(result)
+                    print(f"解析ASCII结果: {ascii_result}")
+                    return ascii_result
                 except Exception as e:
-                    print(f"ASCII字符串解析失败: {e}")
+                    print(f"ASCII字符串解析失败: {e}, hex_data={hex_data}")
                     return hex_data
             
             elif base_type == 'utf8':
@@ -1080,57 +1496,9 @@ class ProtocolManager:
                 except:
                     return hex_data
             
-            elif base_type == 'char':
-                # 专门用于显示字符串，优先使用UTF-8编码支持中文
-                try:
-                    # 检查是否只包含数字和常见ASCII字符
-                    is_simple_ascii = all(c in '0123456789abcdefABCDEF' for c in hex_data)
-                    # 如果全是数字，可能是纯数字字符串，直接显示原始16进制
-                    if is_simple_ascii and len(hex_data) <= 8:
-                        # 可能是纯数字，尝试显示数值
-                        value = int(hex_data, 16)
-                        return str(value)
-                        
-                    # 对于ASCII范围内的字符，直接用ASCII解码可能更好
-                    is_ascii_range = True
-                    for i in range(0, len(hex_data), 2):
-                        if i+1 < len(hex_data):
-                            byte_val = int(hex_data[i:i+2], 16)
-                            if byte_val > 127:
-                                is_ascii_range = False
-                                break
-                    
-                    if is_ascii_range:
-                        result = bytes.fromhex(hex_data).decode('ascii', errors='replace')
-                        # 检查结果是否包含问号(解码失败标志)
-                        if '' not in result:
-                            return result
-                    
-                    # 尝试其他编码
-                    # 先尝试UTF-8
-                    utf8_result = bytes.fromhex(hex_data).decode('utf-8', errors='replace')
-                    if '' not in utf8_result:
-                        return utf8_result
-                    
-                    # 再尝试GB2312
-                    try:
-                        gb_result = bytes.fromhex(hex_data).decode('gb2312', errors='replace')
-                        if '' not in gb_result:
-                            return gb_result
-                    except:
-                        pass
-                        
-                    # 最后尝试latin1（总能成功，但可能不是正确的编码）
-                    latin_result = bytes.fromhex(hex_data).decode('latin1', errors='replace')
-                    
-                    # 如果最终结果仍然包含大量替换字符，直接返回16进制
-                    if latin_result.count('') > len(latin_result) / 3:
-                        return f"0x{hex_data}"
-                    
-                    return latin_result
-                except Exception as e:
-                    print(f"字符解码失败: {e}")
-                    return f"0x{hex_data}"
+            elif base_type == 'dec':
+                # 直接返回原始的十六进制值，不进行任何转换 (原char)
+                return hex_data
             
             elif base_type == 'hex':
                 # 保持原始16进制形式，但格式化为带0x前缀的形式
@@ -1179,10 +1547,10 @@ class ProtocolManager:
                 # 尝试将16进制转换为UTF-8字符串，支持中文
                 try:
                     return bytes.fromhex(hex_data).decode('utf-8', errors='replace')
-                except:
+                except Exception:
                     try:
                         return bytes.fromhex(hex_data).decode('gb2312', errors='replace')
-                    except:
+                    except Exception:
                         return hex_data
                     
             elif base_type in ['bytes', 'CUSTOM']:
@@ -1191,10 +1559,12 @@ class ProtocolManager:
             elif base_type == 'bool':
                 return bool(int(hex_data, 16))
                 
+            # 如果都不匹配，返回原始16进制
+            print(f"未匹配的类型 {base_type}，返回原始16进制: {hex_data}")
             return hex_data  # 默认返回16进制字符串
             
         except Exception as e:
-            print(f"转换字段值失败: {e}")
+            print(f"转换字段值失败: {e}, field_type={field_type}, hex_data={hex_data}")
             return hex_data  # 转换失败时返回原始16进制字符串
     
     def get_supported_field_types(self):
@@ -1203,195 +1573,8 @@ class ProtocolManager:
             "u8", "u16", "u32", "u64", 
             "i8", "i16", "i32", "i64",
             "float", "double",
-            "char", "char.ascii", "ascii", "utf8", "string",
+            "dec", "char", "ascii", "utf8", "string",
             "hex", "bytes",
             "timestamp", "date",
             "bool"
         ]
-    
-    def add_protocol_field(self, protocol_key, field_name, field_type, start_pos, field_length, description=""):
-        """添加协议字段"""
-        protocol = self.get_protocol_by_key(protocol_key)
-        if not protocol:
-            print(f"要添加字段的协议不存在: {protocol_key}")
-            return False, f"字段添加失败: 协议 {protocol_key} 不存在"
-        
-        print(f"向协议 {protocol_key} 添加字段: {field_name}")
-        
-        # 初始化fields字段
-        if 'fields' not in protocol:
-            protocol['fields'] = []
-        
-        # 确保字段名不重复
-        for field in protocol['fields']:
-            if field['name'] == field_name:
-                return False, f"字段添加失败: 字段名 {field_name} 已存在"
-        
-        # 计算结束位置
-        end_pos = start_pos + field_length - 1
-        
-        # 对于非uXX类型字段，在类型后面加上字节数
-        if not field_type.startswith('u') and not field_type.startswith('i'):
-            # 检查类型是否已经包含了字节数
-            if '.' not in field_type:
-                # 添加字节数后缀
-                field_type = f"{field_type}.{field_length}"
-        
-        # 添加新字段
-        new_field = {
-            'name': field_name,
-            'type': field_type,
-            'start_pos': start_pos,
-            'end_pos': end_pos,
-            'endian': 'little',  # 默认使用小端序
-            'description': description  # 添加描述字段
-        }
-        protocol['fields'].append(new_field)
-        
-        # 保存更新后的协议
-        success, message = self.save_protocol(protocol)
-        if not success:
-            return False, f"字段添加失败: {message}"
-        
-        return True, "字段添加成功"
-    
-    def update_protocol_field(self, protocol_key, field_index, field_data):
-        """更新协议字段"""
-        protocol = self.get_protocol_by_key(protocol_key)
-        if not protocol:
-            return False, f"字段更新失败: 协议 {protocol_key} 不存在"
-        
-        # 初始化fields字段
-        if 'fields' not in protocol:
-            protocol['fields'] = []
-        
-        # 检查字段索引是否有效
-        if field_index < 0 or field_index > len(protocol['fields']):
-            return False, f"字段更新失败: 无效的字段索引 {field_index}"
-        
-        # 获取字段类型和位置
-        field_type = field_data.get('type', '')
-        start_pos = field_data.get('start_pos', 0)
-        end_pos = field_data.get('end_pos', 0)
-        
-        # 计算字段长度
-        field_length = end_pos - start_pos + 1
-        
-        # 对于非uXX类型字段，在类型后面加上字节数
-        if not field_type.startswith('u') and not field_type.startswith('i'):
-            # 检查类型是否已经包含了字节数
-            parts = field_type.split('.')
-            base_type = parts[0]
-            # 如果只有基本类型或者是类似char.ascii这样的组合类型但没有数字后缀
-            if len(parts) == 1 or (len(parts) == 2 and not parts[1].isdigit()):
-                # 添加字节数后缀
-                if len(parts) == 2 and not parts[1].isdigit():
-                    # 类似char.ascii这样的组合类型
-                    field_type = f"{parts[0]}.{parts[1]}.{field_length}"
-                else:
-                    # 单一类型
-                    field_type = f"{field_type}.{field_length}"
-        
-        # 更新字段数据
-        field_data['type'] = field_type
-        
-        # 如果字段索引等于字段列表长度，表示添加新字段到末尾
-        if field_index == len(protocol['fields']):
-            protocol['fields'].append(field_data)
-        else:
-            # 否则更新现有字段
-            protocol['fields'][field_index] = field_data
-        
-        # 保存更新后的协议
-        success, message = self.save_protocol(protocol)
-        if not success:
-            return False, f"字段更新失败: {message}"
-        
-        return True, "字段更新成功"
-    
-    def remove_protocol_field(self, protocol_key, field_index):
-        """删除协议字段"""
-        protocol = self.get_protocol_by_key(protocol_key)
-        if not protocol:
-            print(f"要删除字段的协议不存在: {protocol_key}")
-            return False, f"字段删除失败: 协议 {protocol_key} 不存在"
-        
-        if 'fields' not in protocol or field_index >= len(protocol['fields']):
-            return False, f"字段删除失败: 索引 {field_index} 超出范围"
-        
-        # 删除指定索引的字段
-        field_name = protocol['fields'][field_index].get('name', '未命名字段')
-        del protocol['fields'][field_index]
-        
-        # 保存更新后的协议
-        success, message = self.save_protocol(protocol)
-        if not success:
-            return False, f"字段删除失败: {message}"
-        
-        return True, f"字段 {field_name} 删除成功"
-    
-    def _load_protocol_dir(self):
-        """加载协议目录"""
-        try:
-            # 确保协议存储目录存在
-            self.data_dir.mkdir(exist_ok=True)
-            
-            # 备份当前命令列表中的相同ID不同命令的情况
-            command_id_backup = {}
-            for protocol_name, commands in self.protocol_commands.items():
-                for command_id, cmd_list in commands.items():
-                    if isinstance(cmd_list, list) and len(cmd_list) > 1:
-                        # 有多个命令的情况，记录下来
-                        if protocol_name not in command_id_backup:
-                            command_id_backup[protocol_name] = {}
-                        command_id_backup[protocol_name][command_id] = cmd_list
-            
-            # 重新加载所有协议
-            self.protocols = {}  # 清空协议字典
-            self.commands = {}   # 清空命令字典
-            self.protocol_commands = {}  # 清空协议指令字典
-            
-            # 重新加载所有协议
-            result = self.load_all_protocols()
-            
-            # 还原之前备份的多命令情况
-            for protocol_name, commands in command_id_backup.items():
-                if protocol_name in self.protocol_commands:
-                    for command_id, cmd_list in commands.items():
-                        # 检查新加载的命令中是否已有该ID
-                        if command_id in self.protocol_commands[protocol_name]:
-                            existing_cmds = self.protocol_commands[protocol_name][command_id]
-                            # 合并命令列表，避免重复
-                            merged_list = []
-                            existing_cmd_keys = set()
-                            
-                            # 先添加现有命令
-                            if isinstance(existing_cmds, list):
-                                for cmd in existing_cmds:
-                                    if isinstance(cmd, dict):
-                                        cmd_key = f"{cmd.get('name', '')}_{cmd.get('follow', '')}"
-                                        existing_cmd_keys.add(cmd_key)
-                                        merged_list.append(cmd)
-                            elif isinstance(existing_cmds, dict):
-                                cmd = existing_cmds
-                                cmd_key = f"{cmd.get('name', '')}_{cmd.get('follow', '')}"
-                                existing_cmd_keys.add(cmd_key)
-                                merged_list.append(cmd)
-                            
-                            # 然后添加备份中的命令，避免重复
-                            for cmd in cmd_list:
-                                if isinstance(cmd, dict):
-                                    cmd_key = f"{cmd.get('name', '')}_{cmd.get('follow', '')}"
-                                    if cmd_key not in existing_cmd_keys:
-                                        merged_list.append(cmd)
-                                        existing_cmd_keys.add(cmd_key)
-                            
-                            # 更新命令列表
-                            self.protocol_commands[protocol_name][command_id] = merged_list
-                        else:
-                            # 如果新加载的命令中没有该ID，直接添加
-                            self.protocol_commands[protocol_name][command_id] = cmd_list
-            
-            return result
-        except Exception as e:
-            return False, f"加载协议目录失败: {str(e)}"

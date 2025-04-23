@@ -1,4 +1,4 @@
-# ui_dialogs.py - 用户界面对话框组件
+﻿# ui_dialogs.py - 用户界面对话框组件
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import struct
@@ -462,7 +462,7 @@ class ProtocolEditor(tk.Toplevel):
         # 如果有预选的协议键，可以等待界面更新后再选择
         if self.protocol_key:
             self.after(100, lambda: self._try_select_protocol_by_key(self.protocol_key))
-
+    
     def _create_widgets(self):
         """创建界面元素"""
         # 创建主框架
@@ -611,8 +611,282 @@ class ProtocolEditor(tk.Toplevel):
     def _highlight_byte_range(self, start_pos, end_pos):
         """高亮显示指定字节范围"""
         # 根据实际情况实现高亮逻辑
-        pass
-
+        if not hasattr(self, 'preview_text'):
+            return
+        
+        # 清除之前的高亮
+        self.preview_text.tag_remove("highlight", "1.0", tk.END)
+        
+        if start_pos is None or end_pos is None or start_pos < 0 or end_pos < 0:
+            return
+        
+        # 将位置转换为十六进制显示中的坐标
+        bytes_per_line = 16  # 每行显示的字节数
+        
+        # 计算起始位置所在的行和列
+        start_line = start_pos // bytes_per_line + 1  # +1 因为行号从1开始
+        start_col = (start_pos % bytes_per_line) * 3 + 7  # 每个字节占3个位置（2个字符+1个空格），+7是偏移量（行首的偏移）
+        
+        # 计算结束位置所在的行和列
+        end_line = end_pos // bytes_per_line + 1
+        end_col = (end_pos % bytes_per_line) * 3 + 7
+        
+        # 如果是同一行
+        if start_line == end_line:
+            self.preview_text.tag_add("highlight", f"{start_line}.{start_col}", f"{end_line}.{end_col+2}")
+        else:
+            # 跨行高亮
+            # 高亮第一行从起始位置到行尾
+            self.preview_text.tag_add("highlight", f"{start_line}.{start_col}", f"{start_line}.end")
+            
+            # 高亮中间的完整行
+            for line in range(start_line + 1, end_line):
+                self.preview_text.tag_add("highlight", f"{line}.7", f"{line}.end")
+            
+            # 高亮最后一行从行首到结束位置
+            self.preview_text.tag_add("highlight", f"{end_line}.7", f"{end_line}.{end_col+2}")
+        
+        # 配置高亮样式
+        self.preview_text.tag_configure("highlight", background="yellow", foreground="black")
+        
+        # 确保滚动到可见区域
+        self.preview_text.see(f"{start_line}.0")
+    
+    def _on_mouse_down(self, event):
+        """鼠标按下时的处理"""
+        # 重置选择范围
+        self.selection_start = None
+        self.selection_end = None
+        
+        # 获取当前鼠标位置对应的文本位置
+        pos = self.preview_text.index(f"@{event.x},{event.y}")
+        
+        # 尝试将位置转换为字节索引
+        try:
+            self.selection_start = self._text_pos_to_byte_index(pos)
+            print(f"选择开始: 位置={pos}, 字节索引={self.selection_start}")
+        except ValueError:
+            # 如果位置无效，重置选择
+            self.selection_start = None
+            
+        # 禁用字段按钮直到有有效选择
+        self.set_field_btn.config(state=tk.DISABLED)
+        
+    def _on_mouse_drag(self, event):
+        """鼠标拖动时的处理"""
+        if self.selection_start is None:
+            return
+            
+        # 获取当前鼠标位置对应的文本位置
+        pos = self.preview_text.index(f"@{event.x},{event.y}")
+        
+        # 尝试将位置转换为字节索引
+        try:
+            current_pos = self._text_pos_to_byte_index(pos)
+            if current_pos >= 0:
+                self.selection_end = current_pos
+                # 高亮显示选中的字节范围
+                self._highlight_byte_range(self.selection_start, self.selection_end)
+                print(f"拖动中: 结束位置={pos}, 字节索引={self.selection_end}")
+        except ValueError:
+            # 如果位置无效，忽略
+            pass
+            
+    def _on_mouse_up(self, event):
+        """鼠标释放时的处理"""
+        if self.selection_start is not None and self.selection_end is not None:
+            # 确保起始位置小于结束位置
+            if self.selection_start > self.selection_end:
+                self.selection_start, self.selection_end = self.selection_end, self.selection_start
+            
+            # 启用字段按钮
+            self.set_field_btn.config(state=tk.NORMAL)
+            print(f"选择完成: 字节范围={self.selection_start}-{self.selection_end}")
+            
+    def _text_pos_to_byte_index(self, text_pos):
+        """将文本位置转换为字节索引"""
+        # 解析行列位置 (格式如 "1.0")
+        line, col = map(int, text_pos.split('.'))
+        if line < 1 or col < 0:
+            raise ValueError("无效的文本位置")
+            
+        # 每行的格式: "0000: 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        # 偏移量占用5个字符 (如 "0000:")
+        # 每个字节占用3个字符 (如 "00 ")
+        if col < 7:  # 偏移量部分，不是字节
+            return -1
+            
+        # 计算在当前行的字节索引
+        byte_in_line = (col - 7) // 3
+        if byte_in_line < 0 or byte_in_line >= 16:  # 每行16个字节
+            return -1
+            
+        # 计算总的字节索引
+        byte_index = (line - 1) * 16 + byte_in_line
+        
+        # 确保字节索引在有效范围内
+        if byte_index * 2 >= len(self.original_hex_data):
+            return -1
+            
+        return byte_index
+    
+    def _set_selection_as_field(self):
+        """将选中的字节范围设置为字段"""
+        if self.selection_start is None or self.selection_end is None:
+            messagebox.showinfo("提示", "请先选择字节范围")
+            return
+        
+        # 确保起始位置小于结束位置
+        if self.selection_start > self.selection_end:
+            self.selection_start, self.selection_end = self.selection_end, self.selection_start
+            
+        # 创建字段编辑对话框
+        selected_range = {
+            'start': self.selection_start,
+            'end': self.selection_end
+        }
+        
+        # 获取当前选中的协议对象
+        protocol_obj = None
+        if hasattr(self, 'parent_protocol') and self.parent_protocol:
+            protocol_obj = self.parent_protocol
+        
+        from protocol_manager import ProtocolManager
+        if not protocol_obj:
+            protocol_manager = ProtocolManager()
+            protocol_name = self.protocol_name.get().strip()
+            if protocol_name:
+                protocol_obj = protocol_manager.get_protocol(protocol_name) or {}
+        
+        # 打开字段编辑对话框
+        ProtocolFieldDialog(self, protocol_obj=protocol_obj or {}, field_data=selected_range, callback=self._field_callback)
+    
+    def _field_callback(self, data):
+        """字段编辑对话框的回调处理"""
+        if not data or not isinstance(data, dict):
+            return {'success': False, 'message': '无效的数据'}
+            
+        # 获取操作类型和字段数据
+        operation = data.get('operation')
+        field_data = data.get('field_data', {})
+        field_name = field_data.get('name', '')
+        
+        if not field_name:
+            return {'success': False, 'message': '字段名称不能为空'}
+            
+        try:
+            # 获取当前选中或创建中的协议对象
+            protocol_obj = None
+            protocol_key = None
+            
+            # 检查是哪个类的实例
+            is_protocol_editor = self.__class__.__name__ == 'ProtocolEditor'
+            
+            if is_protocol_editor:
+                # ProtocolEditor类使用selected_protocol和selected_protocol_key
+                if hasattr(self, 'selected_protocol') and self.selected_protocol:
+                    protocol_obj = self.selected_protocol
+                    protocol_key = self.selected_protocol_key
+        else:
+                # ProtocolSelectionDialog类使用parent_protocol
+                if hasattr(self, 'parent_protocol') and self.parent_protocol:
+                    protocol_obj = self.parent_protocol
+                    protocol_key = self.parent_protocol.get('name', '')
+            
+            if not protocol_obj and not is_protocol_editor:
+                # 只在ProtocolSelectionDialog中尝试从输入获取协议名称
+                # 尝试从输入的名称获取协议
+                protocol_name = self.protocol_name.get().strip() if hasattr(self, 'protocol_name') else ""
+                if protocol_name:
+                    from protocol_manager import ProtocolManager
+                    protocol_manager = ProtocolManager()
+                    protocol_obj = protocol_manager.get_protocol(protocol_name)
+                    protocol_key = protocol_name
+            
+            if not protocol_obj and not is_protocol_editor:
+                # 只在ProtocolSelectionDialog中创建临时协议数据
+                # 如果没有找到协议，先创建临时协议数据
+                protocol_id = self.protocol_id_var.get().strip() if hasattr(self, 'protocol_id_var') else ""
+                protocol_name = self.protocol_name.get().strip() if hasattr(self, 'protocol_name') else ""
+                
+                if not protocol_name:
+                    return {'success': False, 'message': '请先输入协议名称'}
+                
+                protocol_obj = {
+                    "name": protocol_name,
+                    "protocol_id_hex": protocol_id,
+                    "protocol_id_dec": str(int(protocol_id, 16)) if protocol_id else "0",
+                    "description": "",
+                    "type": self.type_var.get() if hasattr(self, 'type_var') else "protocol",
+                    "fields": []
+                }
+                
+                # 如果是命令类型，设置parent_protocol
+                if hasattr(self, 'type_var') and self.type_var.get() == "command":
+                    if hasattr(self, 'parent_protocol_var') and self.parent_protocol_var.get():
+                        parent_name = self.parent_protocol_var.get().split(" ")[0]
+                        protocol_obj["parent_protocol"] = parent_name
+                
+                protocol_key = protocol_obj["name"]
+            
+            # 确保协议对象有字段列表
+            if protocol_obj and 'fields' not in protocol_obj:
+                protocol_obj['fields'] = []
+            
+            if not protocol_obj:
+                return {'success': False, 'message': '未选择有效协议'}
+                
+            # 检查是否有同名字段
+            found_existing = False
+            for i, field in enumerate(protocol_obj['fields']):
+                if field.get('name') == field_name:
+                    # 如果是编辑操作，先删除旧字段
+                    if operation == 'edit':
+                        protocol_obj['fields'].pop(i)
+                        found_existing = True
+                        break
+            else:
+                        return {'success': False, 'message': f'字段 "{field_name}" 已存在'}
+            
+            # 添加或更新字段
+            protocol_obj['fields'].append(field_data)
+            
+            # 保存协议
+            from protocol_manager import ProtocolManager
+            protocol_manager = ProtocolManager()
+            
+            if is_protocol_editor:
+                # 在ProtocolEditor中，使用update_protocol_field
+                if hasattr(self, 'selected_protocol_key') and self.selected_protocol_key:
+                    print(f"正在更新字段: {field_name}, 协议键: {self.selected_protocol_key}")
+                    success = protocol_manager.update_protocol_field(
+                        self.selected_protocol_key,
+                        field_name,
+                        field_data
+                    )
+                    
+                    if success:
+                        # 更新显示
+                        if hasattr(self, '_update_fields_display'):
+                            self._update_fields_display()
+                        return {'success': True, 'message': f'字段 "{field_name}" 已添加到协议'}
+                    else:
+                        return {'success': False, 'message': '保存字段时出错'}
+            else:
+                # 在ProtocolSelectionDialog中，使用save_protocol
+                print(f"正在保存协议: {protocol_key}, 字段: {field_name}")
+                success, message = protocol_manager.save_protocol(protocol_obj)
+                
+                if success:
+                    return {'success': True, 'message': f'字段 "{field_name}" 已添加到协议'}
+        else:
+                    return {'success': False, 'message': f'保存字段失败: {message}'}
+                
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {'success': False, 'message': f'操作失败: {str(e)}'}
+    
     def _add_protocol_field(self):
         """添加字段"""
         if not self.selected_protocol:
@@ -693,102 +967,6 @@ class ProtocolEditor(tk.Toplevel):
             import traceback
             traceback.print_exc()
 
-    def _field_callback(self, data):
-        """字段回调处理
-        处理字段的添加、编辑和删除操作
-        
-        参数:
-            data (dict): 包含操作类型和字段数据的字典
-        
-        返回:
-            dict: 包含操作结果的字典 {'success': bool, 'message': str}
-        """
-        try:
-            if not data or not isinstance(data, dict):
-                return {'success': False, 'message': '无效的数据'}
-            
-            # 获取操作类型
-            operation = data.get('operation')
-            
-            # 检查是否有选中的协议
-            if not self.selected_protocol or not self.selected_protocol_key:
-                return {'success': False, 'message': '未选择有效协议'}
-            
-            # 字段数据
-            field_data = data.get('field_data', {})
-            field_name = field_data.get('name', '')
-            
-            if not field_name:
-                return {'success': False, 'message': '字段名称不能为空'}
-            
-            # 根据操作类型进行处理
-            if operation == 'add':
-                # 添加字段
-                # 检查字段是否已存在
-                if 'fields' not in self.selected_protocol:
-                    self.selected_protocol['fields'] = []
-                
-                for field in self.selected_protocol['fields']:
-                    if field.get('name') == field_name:
-                        return {'success': False, 'message': f'字段 "{field_name}" 已存在'}
-                
-                # 添加到协议
-                self.selected_protocol['fields'].append(field_data)
-                
-                # 更新到协议管理器
-                success = self.protocol_manager.update_protocol_field(
-                    self.selected_protocol_key,
-                    field_name,
-                    field_data
-                )
-                
-                if not success:
-                    return {'success': False, 'message': '保存字段时出错'}
-                
-                # 更新显示
-                self._update_fields_display()
-                return {'success': True, 'message': f'已添加字段 "{field_name}"'}
-            
-            elif operation == 'edit':
-                # 编辑字段
-                field_index = data.get('field_index')
-                
-                if field_index is None:
-                    return {'success': False, 'message': '未指定字段索引'}
-                
-                # 更新字段
-                self.selected_protocol['fields'][field_index] = field_data
-                
-                # 更新到协议管理器
-                success = self.protocol_manager.update_protocol_field(
-                    self.selected_protocol_key,
-                    field_name,
-                    field_data
-                )
-                
-                if not success:
-                    return {'success': False, 'message': '更新字段时出错'}
-                
-                # 更新显示
-                self._update_fields_display()
-                return {'success': True, 'message': f'已更新字段 "{field_name}"'}
-            
-            elif operation == 'delete':
-                # 删除字段
-                # 移除字段 - 注意这个操作在_delete_protocol_field方法中已经实现
-                pass
-            
-            else:
-                return {'success': False, 'message': f'未知操作: {operation}'}
-            
-        except Exception as e:
-            print(f"字段操作出错: {e}")
-            import traceback
-            traceback.print_exc()
-            return {'success': False, 'message': f'操作出错: {str(e)}'}
-        
-        return {'success': True, 'message': '操作成功'}
-        
     def _on_field_select(self, event):
         """字段选择事件处理"""
         # 启用/禁用编辑和删除按钮
@@ -817,7 +995,7 @@ class ProtocolEditor(tk.Toplevel):
         is_command = item_text.startswith("命令: ")
         
         # 提取协议/命令名称
-        item_name = item_text.split(": ", 1)[1] if ": " in item_text else item_text
+        item_name = item_text.split(": ", 1)[1].strip() if ": " in item_text else item_text
         
         # 确认删除
         if not messagebox.askyesno("确认删除", f"确定要删除{'命令' if is_command else '协议'} '{item_name}'?"):
@@ -837,24 +1015,16 @@ class ProtocolEditor(tk.Toplevel):
                 self.description_var.set("")
                 self.follow_var.set("")
                 
-                # 清空字段列表
-                for item in self.fields_tree.get_children():
-                    self.fields_tree.delete(item)
-                
-                # 清除当前选中的协议
-                self.selected_protocol = None
-                self.selected_protocol_key = None
-                
                 # 显示成功消息
                 messagebox.showinfo("成功", message)
-            else:
+                            else:
                 messagebox.showerror("错误", message)
         except Exception as e:
             messagebox.showerror("错误", f"删除时发生错误: {str(e)}")
             print(f"删除协议/命令时出错: {e}")
             import traceback
             traceback.print_exc()
-
+    
     def _populate_protocol_list(self):
         """填充协议列表"""
         # 清空列表
@@ -905,7 +1075,7 @@ class ProtocolEditor(tk.Toplevel):
                 if isinstance(commands, dict):
                     # 如果是字典，转换为列表
                     processed_commands = [commands]
-                else:
+                                else:
                     # 如果已经是列表，直接使用
                     processed_commands = commands
                 
@@ -927,7 +1097,7 @@ class ProtocolEditor(tk.Toplevel):
                             self.selected_protocols.append(command_name)
                             added_commands.add(display_key)
                             print(f"添加命令到列表: {command_name} (ID: {command_id})")
-                    else:
+                        else:
                         # 如果不是字典类型或不是命令类型，跳过
                         print(f"跳过非命令对象: {type(command)}")
                         
@@ -957,7 +1127,7 @@ class ProtocolEditor(tk.Toplevel):
         
         print(f"无法找到匹配的协议键: {key}")
         return False
-
+    
     def _select_protocol(self, protocol_key, is_command=False):
         """选择指定的协议或命令"""
         protocol = self.protocol_manager.get_protocol_by_key(protocol_key)
@@ -966,7 +1136,7 @@ class ProtocolEditor(tk.Toplevel):
             if isinstance(protocol, list):
                 if protocol and isinstance(protocol[0], dict):
                     protocol = protocol[0]
-                else:
+                                else:
                     messagebox.showerror("错误", "协议数据格式不正确")
                     return
             
@@ -986,7 +1156,7 @@ class ProtocolEditor(tk.Toplevel):
                         if f"0x{follow_id}" in value:
                             self.follow_var.set(value)
                             break
-                    else:
+            else:
                         self.follow_var.set("")
                 else:
                     self.follow_var.set("")
@@ -1013,8 +1183,8 @@ class ProtocolEditor(tk.Toplevel):
             print(f"列表中共有 {self.protocol_list.size()} 个项目")
             print(f"selected_protocols长度: {len(self.selected_protocols)}")
             return
-        
-        index = self.protocol_list.curselection()[0]
+            
+            index = self.protocol_list.curselection()[0]
         print(f"选中的索引: {index}")
         
         if index >= len(self.selected_protocols):
@@ -1032,7 +1202,7 @@ class ProtocolEditor(tk.Toplevel):
             messagebox.showerror("错误", "协议数据不存在")
             print(f"找不到协议数据: {protocol_key}")
             return
-        
+            
         print(f"获取到协议数据: {protocol_data.get('name')} (ID: {protocol_data.get('protocol_id_hex')})")
         
         # 更新协议信息
@@ -1059,10 +1229,10 @@ class ProtocolEditor(tk.Toplevel):
         # 使用协议管理器更新协议
         try:
             success, message = self.protocol_manager.update_protocol(protocol_data)
-            if success:
+                if success:
                 messagebox.showinfo("成功", f"协议已更新: {protocol_data.get('name')}")
                 # 刷新协议列表以显示更新后的信息
-                self._populate_protocol_list()
+                    self._populate_protocol_list()
                 # 重新选择当前协议
                 for i, item_text in enumerate(self.protocol_list.get(0, tk.END)):
                     item_type = "命令" if protocol_data.get('type') == 'command' else "协议"
@@ -1072,8 +1242,8 @@ class ProtocolEditor(tk.Toplevel):
                         self.protocol_list.see(i)
                         self._on_select(None)
                         break
-            else:
-                messagebox.showerror("错误", f"更新协议失败: {message}")
+                else:
+                    messagebox.showerror("错误", f"更新协议失败: {message}")
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -1373,26 +1543,26 @@ class ProtocolEditor(tk.Toplevel):
                 
                 if success:
                     print(f"成功更新{'命令' if protocol_data.get('type') == 'command' else '协议'}: {protocol_data.get('name')}")
-                    # 刷新协议列表
-                    self._populate_protocol_list()
+                # 刷新协议列表
+                self._populate_protocol_list()
                     
                     # 尝试重新选择更新后的项
-                    if protocol_data.get('name'):
-                        # 遍历列表项查找匹配的名称
-                        for i, item_text in enumerate(self.protocol_list.get(0, tk.END)):
-                            item_type = "命令" if protocol_data.get('type') == 'command' else "协议"
-                            if f"{item_type}: {protocol_data.get('name')}" == item_text:
-                                # 选中匹配的项
-                                self.protocol_list.selection_clear(0, tk.END)
-                                self.protocol_list.selection_set(i)
-                                self.protocol_list.see(i)
-                                # 触发选择事件更新详情面板
-                                self._on_select(None)
-                                print(f"已重新选择更新后的项: {item_text}")
-                                break
+                if protocol_data.get('name'):
+                    # 遍历列表项查找匹配的名称
+                    for i, item_text in enumerate(self.protocol_list.get(0, tk.END)):
+                        item_type = "命令" if protocol_data.get('type') == 'command' else "协议"
+                        if f"{item_type}: {protocol_data.get('name')}" == item_text:
+                            # 选中匹配的项
+                            self.protocol_list.selection_clear(0, tk.END)
+                            self.protocol_list.selection_set(i)
+                            self.protocol_list.see(i)
+                            # 触发选择事件更新详情面板
+                            self._on_select(None)
+                            print(f"已重新选择更新后的项: {item_text}")
+                            break
                 
-                    # 显示成功消息
-                    messagebox.showinfo("成功", f"成功更新{'命令' if protocol_data.get('type') == 'command' else '协议'}: {protocol_data.get('name')}")
+                # 显示成功消息
+                messagebox.showinfo("成功", f"成功更新{'命令' if protocol_data.get('type') == 'command' else '协议'}: {protocol_data.get('name')}")
                 else:
                     print(f"更新失败: {message}")
                     messagebox.showerror("错误", f"更新失败: {message}")
@@ -1467,8 +1637,8 @@ class ProtocolEditor(tk.Toplevel):
                 
                     if not found:
                         self.follow_var.set("")
-                else:
-                    self.follow_var.set("")
+                    else:
+                        self.follow_var.set("")
             else:
                 self.follow_frame.pack_forget()
                 self.follow_var.set("")
@@ -1480,7 +1650,7 @@ class ProtocolEditor(tk.Toplevel):
             
             # 加载字段
             self._update_fields_tree()
-        else:
+                    else:
             # 清空信息
             self.protocol_name_var.set('')
             self.protocol_id_var.set('')
@@ -1510,11 +1680,11 @@ class ProtocolEditor(tk.Toplevel):
             if protocol and isinstance(protocol[0], dict):
                 protocol = protocol[0]
             else:
-                return
-        
-        if not protocol or 'fields' not in protocol:
             return
-        
+            
+        if not protocol or 'fields' not in protocol:
+                return
+                
         # 按位置排序字段
         sorted_fields = sorted(protocol['fields'], 
                              key=lambda f: f.get('start_pos', 0))
@@ -1540,8 +1710,8 @@ class ProtocolEditor(tk.Toplevel):
         
         # 检查是否有选中的协议
         if not self.selected_protocol or 'fields' not in self.selected_protocol:
-            return
-        
+                return
+                
         # 添加字段到字段列表
         for field in self.selected_protocol['fields']:
             # 获取字段信息
@@ -1761,7 +1931,7 @@ class ProtocolFieldDialog(tk.Toplevel):
         except ValueError:
             messagebox.showerror("错误", "起始位置和结束位置必须是整数")
             return
-        
+            
         # 字段验证
         if not field_name:
             messagebox.showerror("错误", "字段名称不能为空")
@@ -1770,11 +1940,11 @@ class ProtocolFieldDialog(tk.Toplevel):
         if not field_type:
             messagebox.showerror("错误", "字段类型不能为空")
             return
-        
+            
         if start_pos < 0 or end_pos < 0:
             messagebox.showerror("错误", "位置不能为负数")
             return
-        
+            
         if start_pos > end_pos:
             messagebox.showerror("错误", "起始位置不能大于结束位置")
             return
@@ -1785,8 +1955,8 @@ class ProtocolFieldDialog(tk.Toplevel):
             for field in fields:
                 if field.get('name') == field_name:
                     messagebox.showerror("错误", f"字段名称 '{field_name}' 已存在")
-                    return
-        
+            return
+            
         # 构建字段数据
         field_data = {
             "name": field_name,
@@ -1810,12 +1980,12 @@ class ProtocolFieldDialog(tk.Toplevel):
                 if len(parts) == 2 and not parts[1].isdigit():
                     # 类似char.ascii这样的组合类型
                     field_data["type"] = f"{parts[0]}.{parts[1]}.{field_length}"
-                else:
+            else:
                     # 单一类型
                     field_data["type"] = f"{field_type}.{field_length}"
         
         # 回调处理
-        if self.callback:
+            if self.callback:
             operation = "edit" if not self.is_new else "add"
             callback_data = {
                 "operation": operation,
@@ -1826,15 +1996,21 @@ class ProtocolFieldDialog(tk.Toplevel):
             if not self.is_new and self.field_index is not None:
                 callback_data["field_index"] = self.field_index
                 
+            # 调用回调函数
             result = self.callback(callback_data)
             
-            if result and result.get('success'):
+            # 处理回调结果
+            if result and isinstance(result, dict) and result.get('success'):
                 messagebox.showinfo("成功", result.get('message', "字段已保存"))
-                self.destroy()
-            else:
-                messagebox.showerror("错误", result.get('message', "保存失败"))
+                    self.destroy()
+                else:
+                error_msg = result.get('message', "保存失败") if result and isinstance(result, dict) else "保存失败，未返回有效结果"
+                messagebox.showerror("错误", error_msg)
+                print(f"保存字段失败: {result}")
         else:
             # 如果没有回调，直接关闭对话框
+            print("警告: 没有提供回调函数，无法保存字段")
+            messagebox.showwarning("警告", "系统错误: 未配置保存处理")
             self.destroy()
     
     def _on_cancel(self):
@@ -1855,7 +2031,7 @@ class ProtocolFieldDialog(tk.Toplevel):
         """填充选中的字节范围到起始和结束位置"""
         if not self.field_data or not isinstance(self.field_data, dict):
             return
-            
+        
         # 获取选中范围的起始和结束位置
         start_pos = self.field_data.get('start')
         end_pos = self.field_data.get('end')
@@ -1882,6 +2058,6 @@ class ProtocolFieldDialog(tk.Toplevel):
             self.type_var.set("u32")
         elif length == 8:
             self.type_var.set("u64")
-        else:
+                        else:
             # 对于其他长度，建议使用字节数组
             self.type_var.set(f"char.{length}")

@@ -7,13 +7,14 @@ from ui_dialogs import ProtocolSelectionDialog, ProtocolEditor, ProtocolFieldDia
 import json
 import os
 
+
 class HexParserTool:
     """16进制数据解析工具主界面"""
     
     def __init__(self, root):
         """初始化数据解析工具"""
         self.root = root
-        self.root.title("DataFormater  --2.2.4")
+        self.root.title("DataFormater  --2.2.5")
         self.root.geometry("1200x800")
         
         # 不再绑定全局键盘事件，因为它会干扰正常输入
@@ -286,6 +287,55 @@ class HexParserTool:
         self.output_text.pack(fill=tk.BOTH, expand=True)
         self.output_text.config(state=tk.DISABLED)
         
+        # 输出分页：状态与控件
+        self.output_page_size = 50  # 每页行数
+        self.output_current_page = 1
+        self.output_total_pages = 1
+        self.formatted_lines = []
+
+        # 移除格式化结果的分页按钮，只保留参数列表的分页
+        # output_pagination = ttk.Frame(self.output_left)
+        # output_pagination.pack(fill=tk.X, pady=(2, 0))
+        # self.output_prev_btn = ttk.Button(output_pagination, text="上一页", command=lambda: self._go_prev_output_page(), width=8)
+        # self.output_prev_btn.pack(side=tk.LEFT)
+        # self.output_page_label = ttk.Label(output_pagination, text="第 1/1 页")
+        # self.output_page_label.pack(side=tk.LEFT, padx=8)
+        # self.output_next_btn = ttk.Button(output_pagination, text="下一页", command=lambda: self._go_next_output_page(), width=8)
+        # self.output_next_btn.pack(side=tk.LEFT)
+
+        # 移除格式化结果的分页相关方法
+        # def _render_output_page(self):
+        #     """根据当前页渲染输出文本"""
+        #     total = len(self.formatted_lines)
+        #     self.output_total_pages = max(1, (total + self.output_page_size - 1) // self.output_page_size)
+        #     self.output_current_page = max(1, min(self.output_current_page, self.output_total_pages))
+        #     start = (self.output_current_page - 1) * self.output_page_size
+        #     end = min(total, start + self.output_page_size)
+        #     page_text = '\n'.join(self.formatted_lines[start:end]) if total else ''
+        #     self.output_text.config(state=tk.NORMAL)
+        #     self.output_text.delete("1.0", tk.END)
+        #     self.output_text.insert(tk.END, page_text)
+        #     self.output_text.config(state=tk.DISABLED)
+        #     # 更新按钮与标签
+        #     self.output_page_label.config(text=f"第 {self.output_current_page}/{self.output_total_pages} 页")
+        #     self.output_prev_btn.config(state=(tk.NORMAL if self.output_current_page > 1 else tk.DISABLED))
+        #     self.output_next_btn.config(state=(tk.NORMAL if self.output_current_page < self.output_total_pages else tk.DISABLED))
+
+        # self._render_output_page = _render_output_page.__get__(self)
+
+        # def _go_prev_output_page(self):
+        #     if self.output_current_page > 1:
+        #         self.output_current_page -= 1
+        #         self._render_output_page()
+
+        # def _go_next_output_page(self):
+        #     if self.output_current_page < self.output_total_pages:
+        #         self.output_current_page += 1
+        #         self._render_output_page()
+
+        # self._go_prev_output_page = _go_prev_output_page.__get__(self)
+        # self._go_next_output_page = _go_next_output_page.__get__(self)
+        
         # 右侧：只保留参数表格
         parameter_label = ttk.Label(self.output_right, text="参数列表:")
         parameter_label.pack(anchor=tk.W, pady=(0, 2))
@@ -294,9 +344,123 @@ class HexParserTool:
         self.parameter_frame = ttk.Frame(self.output_right)
         self.parameter_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 配置网格权重
-        for i in range(5):  # 假设有5列
-            self.parameter_frame.grid_columnconfigure(i, weight=1)
+        # 参数分页控件
+        self.param_page_size = 15
+        self.param_current_page = 1
+        self.param_total_pages = 1
+        self.parameter_all_fields = []
+        param_pagination = ttk.Frame(self.output_right)
+        param_pagination.pack(fill=tk.X, pady=(2, 6))
+        self.param_prev_btn = ttk.Button(param_pagination, text="上一页", command=lambda: self._go_prev_param_page(), width=8)
+        self.param_prev_btn.pack(side=tk.LEFT)
+        self.param_page_label = ttk.Label(param_pagination, text="第 1/1 页")
+        self.param_page_label.pack(side=tk.LEFT, padx=8)
+        self.param_next_btn = ttk.Button(param_pagination, text="下一页", command=lambda: self._go_next_param_page(), width=8)
+        self.param_next_btn.pack(side=tk.LEFT)
+        
+        # 创建Treeview用于参数表格
+        self.parameter_tree = ttk.Treeview(self.parameter_frame, columns=('type', 'position', 'value', 'description'), show='tree headings')
+        self.parameter_tree.heading('#0', text='字段名', anchor='w')
+        self.parameter_tree.heading('type', text='类型', anchor='w')
+        self.parameter_tree.heading('position', text='位置', anchor='w')
+        self.parameter_tree.heading('value', text='值', anchor='w')
+        self.parameter_tree.heading('description', text='描述', anchor='w')
+        
+        # 设置列宽
+        self.parameter_tree.column('#0', width=120, minwidth=80)
+        self.parameter_tree.column('type', width=80, minwidth=60)
+        self.parameter_tree.column('position', width=80, minwidth=60)
+        self.parameter_tree.column('value', width=100, minwidth=80)
+        self.parameter_tree.column('description', width=150, minwidth=100)
+        
+        # 添加滚动条
+        self.parameter_scrollbar = ttk.Scrollbar(self.parameter_frame, orient=tk.VERTICAL, command=self.parameter_tree.yview)
+        self.parameter_tree.configure(yscrollcommand=self.parameter_scrollbar.set)
+        
+        # 布局
+        self.parameter_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.parameter_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 绑定点击事件
+        #self.parameter_tree.bind('<Button-1>', self._on_parameter_tree_click)
+        #self.parameter_tree.bind('<Motion>', self._on_parameter_tree_motion)
+        
+        # 绑定分页渲染方法
+        def _render_parameter_page(self):
+            fields = self.parameter_all_fields or []
+            total = len(fields)
+            self.param_total_pages = max(1, (total + self.param_page_size - 1) // self.param_page_size)
+            self.param_current_page = max(1, min(self.param_current_page, self.param_total_pages))
+            start = (self.param_current_page - 1) * self.param_page_size
+            end = min(total, start + self.param_page_size)
+            # 清空现有控件
+            for widget in self.parameter_frame.winfo_children():
+                widget.destroy()
+            # 表头
+            headers = ["字段名", "类型", "位置", "值", "描述"]
+            for i, header in enumerate(headers):
+                label = ttk.Label(self.parameter_frame, text=header, relief="ridge")
+                label.grid(row=0, column=i, sticky="nsew", padx=1, pady=1)
+            # 行
+            row_index = 1
+            for field in self.parameter_all_fields[start:end]:
+                field_name = field.get('name', '')
+                field_type = field.get('type', '')
+                start_pos = field.get('start_pos', 0)
+                end_pos = field.get('end_pos', 0)
+                position = f"{start_pos}-{end_pos}"
+                value = field.get('value', '') if isinstance(field.get('value', ''), str) else str(field.get('value', ''))
+                description = field.get('description', '')
+                # 创建标签
+                name_label = ttk.Label(self.parameter_frame, text=field_name, relief="ridge", cursor="hand2")
+                type_label = ttk.Label(self.parameter_frame, text=field_type, relief="ridge", cursor="hand2")
+                pos_label = ttk.Label(self.parameter_frame, text=position, relief="ridge", cursor="hand2")
+                value_label = ttk.Label(self.parameter_frame, text=value, relief="ridge", cursor="hand2")
+                desc_label = ttk.Label(self.parameter_frame, text=description, relief="ridge", cursor="hand2")
+                
+                # 为每个标签绑定点击事件，实现高亮功能
+                field_info = {
+                    'name': field_name,
+                    'start_pos': start_pos,
+                    'end_pos': end_pos,
+                    'type': field_type,
+                    'value': value,
+                    'description': description
+                }
+                
+                # 绑定点击事件到所有标签
+                name_label.bind("<Button-1>", lambda e, info=field_info: self._on_parameter_click(info))
+                type_label.bind("<Button-1>", lambda e, info=field_info: self._on_parameter_click(info))
+                pos_label.bind("<Button-1>", lambda e, info=field_info: self._on_parameter_click(info))
+                value_label.bind("<Button-1>", lambda e, info=field_info: self._on_parameter_click(info))
+                desc_label.bind("<Button-1>", lambda e, info=field_info: self._on_parameter_click(info))
+                
+                # 布局
+                name_label.grid(row=row_index, column=0, sticky="nsew", padx=1, pady=1)
+                type_label.grid(row=row_index, column=1, sticky="nsew", padx=1, pady=1)
+                pos_label.grid(row=row_index, column=2, sticky="nsew", padx=1, pady=1)
+                value_label.grid(row=row_index, column=3, sticky="nsew", padx=1, pady=1)
+                desc_label.grid(row=row_index, column=4, sticky="nsew", padx=1, pady=1)
+                row_index += 1
+            # 更新分页控件
+            self.param_page_label.config(text=f"第 {self.param_current_page}/{self.param_total_pages} 页")
+            self.param_prev_btn.config(state=(tk.NORMAL if self.param_current_page > 1 else tk.DISABLED))
+            self.param_next_btn.config(state=(tk.NORMAL if self.param_current_page < self.param_total_pages else tk.DISABLED))
+
+        self._render_parameter_page = _render_parameter_page.__get__(self)
+
+        def _go_prev_param_page(self):
+            if self.param_current_page > 1:
+                self.param_current_page -= 1
+                self._render_parameter_page()
+
+        def _go_next_param_page(self):
+            if self.param_current_page < self.param_total_pages:
+                self.param_current_page += 1
+                self._render_parameter_page()
+
+        self._go_prev_param_page = _go_prev_param_page.__get__(self)
+        self._go_next_param_page = _go_next_param_page.__get__(self)
         
         # 禁用系统默认的选择样式
         self.output_text.config(selectbackground="white", selectforeground="black")
@@ -454,8 +618,8 @@ class HexParserTool:
             # 直接解析协议数据
             try:
                 parsed_data = self.protocol_manager.parse_protocol_data(hex_only, protocol)
-                if parsed_data and 'fields' in parsed_data:
-                    self._update_parameter_table(parsed_data['fields'])
+                if (parsed_data and 'fields' in parsed_data) or protocol.get('fields'):
+                    self._update_parameter_table(parsed_data.get('fields', []) if parsed_data else protocol.get('fields', []))
                 else:
                     # 使用协议的字段定义更新表格
                     self._update_parameter_table(protocol.get('fields', []))
@@ -708,11 +872,15 @@ class HexParserTool:
             # 组合偏移量、十六进制和ASCII部分
             formatted_lines.append(f"{offset_str}: {hex_part}{padding}  |{ascii_part}|")
         
-        formatted_text = '\n'.join(formatted_lines)
+        # 存储行并分页渲染
+        self.formatted_lines = formatted_lines
+        self.output_current_page = 1
+        # self._render_output_page()  # 已注释掉分页功能
         
+        # 直接显示所有格式化结果
         self.output_text.config(state=tk.NORMAL)  
         self.output_text.delete("1.0", tk.END)
-        self.output_text.insert(tk.END, formatted_text)
+        self.output_text.insert(tk.END, '\n'.join(formatted_lines))
         self.output_text.config(state=tk.DISABLED)
     
     def _on_mouse_down(self, event):
@@ -981,98 +1149,143 @@ class HexParserTool:
             dict: 包含起始位置和结束位置的字典 {'start': int, 'end': int}
             None: 如果没有选中任何字节
         """
-        # 如果有文本选择，尝试解析其字节范围
         try:
-            selection_range = self.output_text.tag_ranges("selection")
-            if not selection_range:
+            selection_ranges = self.output_text.tag_ranges("selection")
+            if not selection_ranges:
                 return None
-            
-            # 获取选择的起止位置
-            start = selection_range[0]
-            end = selection_range[1]
-            
-            # 从文本坐标转换为字节位置
-            start_line, start_col = map(int, str(start).split('.'))
-            end_line, end_col = map(int, str(end).split('.'))
-            
-            # 获取每行显示的字节数
-            bytes_per_line = self.bytes_per_line.get()
-            
-            # 获取所有可见行的文本内容，提取每行的偏移量
+
+            # 找到整体选择的最小起点与最大终点
+            min_start = selection_ranges[0]
+            max_end = selection_ranges[1]
+            for i in range(2, len(selection_ranges), 2):
+                if str(selection_ranges[i]) < str(min_start):
+                    min_start = selection_ranges[i]
+                if str(selection_ranges[i+1]) > str(max_end):
+                    max_end = selection_ranges[i+1]
+
+            start_line, start_col = map(int, str(min_start).split('.'))
+            end_line, end_col = map(int, str(max_end).split('.'))
+
+            # 获取所有行文本
             all_lines = self.output_text.get("1.0", tk.END).split('\n')
-            line_offsets = []
-            
-            for i, line_text in enumerate(all_lines):
-                if i >= len(all_lines) - 1:  # 忽略最后一个可能为空的行
-                    break
-                    
-                if ":" in line_text:
-                    offset_part = line_text.split(':', 1)[0].strip()
-                    try:
-                        # 16进制偏移量转换为十进制
-                        offset = int(offset_part, 16)
-                        line_offsets.append(offset)
-                    except ValueError:
-                        # 如果转换失败，使用行号*每行字节数作为估计
-                        line_offsets.append(i * bytes_per_line)
+
+            def parse_line_layout(line_text):
+                """解析单行：返回(偏移量, hex_tokens_positions, ascii_bytes_start_col)
+                - 偏移量为十六进制前缀转换的整型；失败则为0
+                - hex_tokens_positions 为 [(start_col, end_col), ...]，每个字节2列闭区间
+                - ascii_bytes_start_col 为 ASCII 区域第一个字符列（位于 '|' 之后）
+                """
+                if ':' not in line_text:
+                    return 0, [], len(line_text)
+
+                # 偏移量
+                header, rest = line_text.split(':', 1)
+                header = header.strip()
+                try:
+                    offset = int(header, 16)
+                except ValueError:
+                    offset = 0
+
+                # hex 区域起止
+                idx = line_text.find(':') + 1
+                n = len(line_text)
+                # 跳过冒号后的空格
+                while idx < n and line_text[idx] == ' ':
+                    idx += 1
+                hex_start_col = idx
+
+                # ASCII 分隔符
+                ascii_bar = line_text.find('|', hex_start_col)
+                if ascii_bar == -1:
+                    hex_end_col = n
+                    ascii_bytes_start_col = n
                 else:
-                    # 没有偏移量的行使用前一行的偏移量加上每行字节数
-                    if line_offsets:
-                        line_offsets.append(line_offsets[-1] + bytes_per_line)
+                    # hex_end_col 是竖线前最后一个非空格位置+1（半开区间尾）
+                    hex_end_col = ascii_bar
+                    while hex_end_col > hex_start_col and line_text[hex_end_col - 1] == ' ':
+                        hex_end_col -= 1
+                    ascii_bytes_start_col = ascii_bar + 1
+
+                # 扫描 hex 字节token的列区间（每个token两位十六进制，间隔单空格）
+                tokens_positions = []
+                c = hex_start_col
+                while c < hex_end_col:
+                    # 跳过空格
+                    while c < hex_end_col and line_text[c] == ' ':
+                        c += 1
+                    if c >= hex_end_col:
+                        break
+                    # 记录两位十六进制列（若不足两位则跳出）
+                    start_c = c
+                    if start_c + 2 <= hex_end_col:
+                        # 验证是否是两个可见字符（不强制校验十六进制字符，以宽容处理）
+                        end_c = start_c + 2
+                        tokens_positions.append((start_c, end_c))
+                        c = end_c
                     else:
-                        line_offsets.append(0)
-            
-            # 计算起始位置和结束位置对应的实际字节偏移
-            if start_line <= len(line_offsets):
-                # 计算当前行内的偏移量，考虑十六进制部分的开始位置（通常在第6列）
-                hex_start_col = 6  # 默认十六进制部分从第6列开始
-                # 检查当前行，确定实际的十六进制起始列
-                if start_line <= len(all_lines):
-                    line_text = all_lines[start_line - 1]
-                    if ":" in line_text:
-                        hex_start_col = line_text.find(':') + 1
-                        while hex_start_col < len(line_text) and line_text[hex_start_col] == ' ':
-                            hex_start_col += 1
-                            
-                # 计算在十六进制部分的列位置
-                col_in_hex = start_col - hex_start_col
-                # 每个字节占3列（2个字符+1个空格），所以除以3得到字节位置
-                start_byte_in_line = col_in_hex // 3
-                # 确保不为负
-                start_byte_in_line = max(0, start_byte_in_line)
-                # 总偏移量 = 行偏移量 + 行内偏移量
-                start_byte = line_offsets[start_line - 1] + start_byte_in_line
+                        break
+                    # 跳过 token 后面的空格
+                    while c < hex_end_col and line_text[c] == ' ':
+                        c += 1
+
+                return offset, tokens_positions, ascii_bytes_start_col
+
+            def map_to_global_byte(line_no: int, col_no: int):
+                """将行列坐标映射为全局字节索引（点击即定位到该行对应字节，避免吸附到行末）"""
+                if line_no < 1 or line_no > len(all_lines):
+                    return None
+                line_text = all_lines[line_no - 1]
+                offset, token_cols, ascii_start_col = parse_line_layout(line_text)
+                if not token_cols:
+                    return offset
+
+                # 如果在 ASCII 区：按字符位置映射到对应字节
+                if col_no >= ascii_start_col:
+                    byte_in_line = col_no - ascii_start_col
+                    if byte_in_line < 0:
+                        byte_in_line = 0
+                    if byte_in_line >= len(token_cols):
+                        byte_in_line = len(token_cols) - 1
+                    return offset + byte_in_line
+
+                # 在 hex/偏移区域：找到 start_col <= col_no 的最后一个 token
+                # 若在首个 token 左侧，映射到第0个字节
+                if col_no < token_cols[0][0]:
+                    return offset
+
+                # 遍历定位（线性，数据行很短，性能足够）
+                chosen = 0
+                for i, (s, e) in enumerate(token_cols):
+                    if col_no >= s:
+                        chosen = i
+                    # 一旦超过当前token的结束位置，停止；确保在 token 内也落在该 token
+                    if col_no < e:
+                        chosen = i
+                        break
+                # 若列在所有 token 之后，chosen 将是最后一个
+                return offset + chosen
+
+            # Tk Text 的 selection 终点是"末尾之后"的位置，这里将 end 列转为"包含末尾"的列
+            adj_end_line, adj_end_col = end_line, end_col
+            if adj_end_col > 0:
+                adj_end_col -= 1
             else:
+                # 借用上一行的末尾
+                if adj_end_line > 1:
+                    adj_end_line -= 1
+                    # 传入一个很大的列号，map 内部会自动夹在末尾字节
+                    adj_end_col = 10 ** 9
+
+            start_byte = map_to_global_byte(start_line, start_col)
+            end_byte = map_to_global_byte(adj_end_line, adj_end_col)
+            if start_byte is None or end_byte is None:
                 return None
-            
-            if end_line <= len(line_offsets):
-                # 对结束位置也做同样处理
-                hex_start_col = 6
-                if end_line <= len(all_lines):
-                    line_text = all_lines[end_line - 1]
-                    if ":" in line_text:
-                        hex_start_col = line_text.find(':') + 1
-                        while hex_start_col < len(line_text) and line_text[hex_start_col] == ' ':
-                            hex_start_col += 1
-                            
-                col_in_hex = end_col - hex_start_col
-                end_byte_in_line = col_in_hex // 3
-                # 如果选择刚好在字节边界结束(落在空格上)，需要减1
-                if col_in_hex % 3 == 0 and col_in_hex > 0:
-                    end_byte_in_line -= 1
-                # 确保不为负
-                end_byte_in_line = max(0, end_byte_in_line)
-                # 总偏移量 = 行偏移量 + 行内偏移量
-                end_byte = line_offsets[end_line - 1] + end_byte_in_line
-            else:
-                return None
-            
-            # 确保结束位置不小于起始位置
-            end_byte = max(start_byte, end_byte)
-            
+
+            if end_byte < start_byte:
+                start_byte, end_byte = end_byte, start_byte
+
             print(f"选中字节范围: 起始={start_byte}, 结束={end_byte}, 长度={end_byte - start_byte + 1}")
             return {'start': start_byte, 'end': end_byte}
-        
         except Exception as e:
             print(f"获取选择范围出错: {e}")
             import traceback
@@ -1143,7 +1356,7 @@ class HexParserTool:
     def _center_window(self, width, height):
         """窗口居中显示"""
         # 增加窗口宽度1/3
-        width = int(width * 1.33)
+        width = int(width * 1.4)
         
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
@@ -1236,12 +1449,17 @@ class HexParserTool:
                 if isinstance(command, dict):
                     command_id = command.get('protocol_id_hex', '').upper()
                     command_name = command.get('name', '')
+                    command_follow = command.get('follow', '')
                     
                     # 如果有当前报文ID，只显示匹配的命令
                     # 如果没有当前报文ID，显示所有命令
                     if (not current_command_id) or (command_id == current_command_id):
                         if command_id and command_name:
-                            display_name = f"{command_name} (0x{command_id})"
+                            # 在显示名称中添加 follow 信息（如果有）
+                            if command_follow:
+                                display_name = f"{command_name} (0x{command_id}, Follow: {command_follow})"
+                            else:
+                                display_name = f"{command_name} (0x{command_id})"
                             command_values.append(display_name)
                             matching_commands.append(command)
             
@@ -1283,11 +1501,20 @@ class HexParserTool:
             
             print("已清除所有高光")
             
-        # 从显示名称中提取命令名称和ID
+        # 从显示名称中提取命令名称、ID和follow信息
         try:
+            # 检查是否包含follow信息
+            if ", Follow: " in selected_command:
+                # 格式为 "命令名称 (0x命令ID, Follow: follow值)"
+                name_part = selected_command.split(' (0x')[0]
+                id_follow_part = selected_command.split(' (0x')[1].strip(')')
+                command_id = id_follow_part.split(', Follow: ')[0]
+                command_follow = id_follow_part.split(', Follow: ')[1]
+            else:
             # 格式为 "命令名称 (0x命令ID)"
-            command_name = selected_command.split(' (0x')[0]
-            command_id = selected_command.split(' (0x')[1].strip(')')
+                name_part = selected_command.split(' (0x')[0]
+                command_id = selected_command.split(' (0x')[1].strip(')')
+                command_follow = ""
         except IndexError:
             return
             
@@ -1297,7 +1524,10 @@ class HexParserTool:
         # 如果已经有保存的匹配命令列表，从中查找
         if hasattr(self, 'matching_commands') and self.matching_commands:
             for command in self.matching_commands:
-                if command.get('name') == command_name and command.get('protocol_id_hex', '').upper() == command_id.upper():
+                # 匹配命令名称、ID和follow字段
+                if (command.get('name') == name_part and 
+                    command.get('protocol_id_hex', '').upper() == command_id.upper() and
+                    command.get('follow', '') == command_follow):
                     command_data = command
                     break
         
@@ -1314,15 +1544,18 @@ class HexParserTool:
             # 查找匹配的命令
             for command in commands:
                 if isinstance(command, dict):
-                    if command.get('name') == command_name and command.get('protocol_id_hex', '').upper() == command_id.upper():
+                    # 匹配命令名称、ID和follow字段
+                    if (command.get('name') == name_part and 
+                        command.get('protocol_id_hex', '').upper() == command_id.upper() and
+                        command.get('follow', '') == command_follow):
                         command_data = command
                         break
         
         if not command_data:
-            print(f"未找到匹配的命令: {command_name} (0x{command_id})")
+            print(f"未找到匹配的命令: {name_part} (0x{command_id}, Follow: {command_follow})")
             return
             
-        print(f"应用命令模板: {command_name} (0x{command_id})")
+        print(f"应用命令模板: {name_part} (0x{command_id}, Follow: {command_follow})")
         
         # 更新命令详情
         self.command_name_var.set(command_data.get('name', ''))
@@ -1340,18 +1573,34 @@ class HexParserTool:
         command_id_hex = command_data.get('protocol_id_hex', '')
         group = command_data.get('group', '')
         command_name = command_data.get('name', '')
+        command_follow = command_data.get('follow', '')
         
-        # 使用更详细的命令键格式：group/id/name
+        # 使用更详细的命令键格式：group/id/name/follow
         if group and command_id_hex and command_name:
-            self.current_protocol_key = f"{group}/{command_id_hex}/{command_name}"
+            if command_follow:
+                self.current_protocol_key = f"{group}/{command_id_hex}/{command_name}/{command_follow}"
+            else:
+                self.current_protocol_key = f"{group}/{command_id_hex}/{command_name}"
         elif protocol_name and command_id_hex and command_name:
-            self.current_protocol_key = f"{protocol_name}/{command_id_hex}/{command_name}"
+            if command_follow:
+                self.current_protocol_key = f"{protocol_name}/{command_id_hex}/{command_name}/{command_follow}"
+            else:
+                self.current_protocol_key = f"{protocol_name}/{command_id_hex}/{command_name}"
         elif group and command_id_hex:
-            self.current_protocol_key = f"{group}/{command_id_hex}"
+            if command_follow:
+                self.current_protocol_key = f"{group}/{command_id_hex}/{command_follow}"
+            else:
+                self.current_protocol_key = f"{group}/{command_id_hex}"
         elif protocol_name and command_id_hex:
-            self.current_protocol_key = f"{protocol_name}/{command_id_hex}"
+            if command_follow:
+                self.current_protocol_key = f"{protocol_name}/{command_id_hex}/{command_follow}"
+            else:
+                self.current_protocol_key = f"{protocol_name}/{command_id_hex}"
         else:
-            self.current_protocol_key = command_id_hex
+            if command_follow:
+                self.current_protocol_key = f"{command_id_hex}/{command_follow}"
+            else:
+                self.current_protocol_key = command_id_hex
             
         print(f"使用协议键: {self.current_protocol_key}")
             
@@ -1381,7 +1630,7 @@ class HexParserTool:
             if parsed_data and 'fields' in parsed_data:
                 # 更新参数表格显示解析结果
                 self._update_parameter_table(parsed_data.get('fields', []))
-                self.status_var.set(f"已应用命令模板: {command_name}")
+                self.status_var.set(f"已应用命令模板: {name_part}")
             else:
                 # 如果解析失败，使用命令的字段定义
                 self._update_parameter_table(command_data.get('fields', []))
@@ -1390,7 +1639,7 @@ class HexParserTool:
             if not self.raw_hex_data:
                 self.status_var.set("请先格式化数据再应用命令模板")
             elif 'fields' not in command_data or not command_data['fields']:
-                self.status_var.set(f"命令 {command_name} 没有定义字段")
+                self.status_var.set(f"命令 {name_part} 没有定义字段")
     
     def _parse_and_display_protocol(self, protocol, hex_data):
         """解析并显示协议数据"""
@@ -1643,8 +1892,19 @@ class HexParserTool:
                     # 高亮ASCII部分
                     ascii_start_index = line_text.find('|') + 1
                     if ascii_start_index > 0:
-                        ascii_start = f"{line_num}.{ascii_start_index + line_byte_start}"
-                        ascii_end = f"{line_num}.{ascii_start_index + line_byte_end + 1}"
+                        # 计算当前行十六进制部分对应的字节范围
+                        start_byte_index = (text_start_col - 6) // 3
+                        end_byte_index = (text_end_col - 6) // 3
+                        if (text_end_col - 6) % 3 == 0:
+                            end_byte_index -= 1
+                        
+                        # 限制字节索引不超过每行显示的字节数
+                        start_byte_index = max(0, min(start_byte_index, bytes_per_line - 1))
+                        end_byte_index = max(0, min(end_byte_index, bytes_per_line - 1))
+                        
+                        # 高亮ASCII部分
+                        ascii_start = f"{line_num}.{ascii_start_index + start_byte_index}"
+                        ascii_end = f"{line_num}.{ascii_start_index + end_byte_index + 1}"
                         self.output_text.tag_add("defined_field", ascii_start, ascii_end)
             
         # 配置高亮样式 - 使用淡灰色背景
@@ -1711,15 +1971,19 @@ class HexParserTool:
         if not isinstance(command_data, dict):
             return {'success': False, 'message': f'命令数据格式错误: 预期字典类型，实际为{type(command_data)}'}
         
-        # 使用已保存的current_protocol_key，它包含了命令名称
-        if hasattr(self, 'current_protocol_key') and self.current_protocol_key:
-            command_key = self.current_protocol_key
-        else:
-            # 如果没有，构建命令键（应该包含命令名称）
-            command_id = command_data.get('protocol_id_hex', '')
-            group = command_data.get('group', '')
-            command_name = command_data.get('name', '')
-            command_key = f"{group}/{command_id}/{command_name}" if group else f"{command_id}/{command_name}"
+        # 使用 group/protocol_id_hex 作为命令键
+        group = command_data.get('group', '')
+        command_id_hex = command_data.get('protocol_id_hex', '')
+        
+        if not command_id_hex:
+             return {'success': False, 'message': '命令缺少 protocol_id_hex'}
+             
+        # 构建命令键，优先使用 current_protocol_key（包含 follow 等）
+        command_key = getattr(self, 'current_protocol_key', '')
+        if not command_key:
+            # 兜底：保持旧行为，但可能命中父协议或不同 follow 的命令
+            command_key = f"{group}/{command_id_hex}" if group else command_id_hex
+            print(f"使用标准命令键: {command_key}")
         
         if not command_key:
             return {'success': False, 'message': '无法获取命令键值'}
@@ -1771,6 +2035,8 @@ class HexParserTool:
                                 
                             self.command_data[selected_command] = updated_command
                             self._on_command_selected(None)  # 刷新显示
+                            # 更新命令下拉框
+                            self._update_command_combo()
                             print(f"字段添加成功，当前命令字段数量: {len(updated_command.get('fields', []))}")
                         else:
                             print(f"警告: 无法获取更新后的命令数据")
@@ -1801,6 +2067,8 @@ class HexParserTool:
                                 
                             self.command_data[selected_command] = updated_command
                             self._on_command_selected(None)  # 刷新显示
+                            # 更新命令下拉框
+                            self._update_command_combo()
                             print(f"字段更新成功")
                         else:
                             print(f"警告: 无法获取更新后的命令数据")
@@ -1827,6 +2095,8 @@ class HexParserTool:
                                 
                             self.command_data[selected_command] = updated_command
                             self._on_command_selected(None)  # 刷新显示
+                            # 更新命令下拉框
+                            self._update_command_combo()
                             print(f"字段删除成功，当前命令字段数量: {len(updated_command.get('fields', []))}")
                         else:
                             print(f"警告: 无法获取更新后的命令数据")
@@ -1862,7 +2132,7 @@ class HexParserTool:
         # 创建协议选择对话框
         dialog = tk.Toplevel(self.root)
         dialog.title("生成协议文档")
-        dialog.geometry("400x220")
+        dialog.geometry("400x300")
         dialog.transient(self.root)
         dialog.grab_set()
         
@@ -1876,7 +2146,7 @@ class HexParserTool:
         selected_protocol = tk.StringVar()
         
         # 获取所有协议名称列表
-        protocol_list = []  # 移除"所有协议"选项
+        protocol_list = []  
         for protocol in self.protocol_manager.protocols.values():
             if protocol.get('type', '') == 'protocol':
                 name = protocol.get('name', '')
@@ -1899,7 +2169,7 @@ class HexParserTool:
         protocol_combobox.pack(fill=tk.X, pady=(0, 10))
         protocol_combobox.current(0)  # 默认选择第一个协议
         
-        # 文档格式选择区域 - 只保留Word文档选项
+        # 文档格式选择区域
         format_frame = ttk.Frame(dialog, padding=10)
         format_frame.pack(fill=tk.X, expand=False)
         
@@ -1908,11 +2178,43 @@ class HexParserTool:
         # 固定使用Word文档格式
         format_label = ttk.Label(format_frame, text="Word文档(.docx)")
         format_label.pack(anchor=tk.W, pady=2)
+
+        # 语言选择区域
+        language_frame = ttk.Frame(dialog, padding=10)
+        language_frame.pack(fill=tk.X, expand=False)
+        
+        ttk.Label(language_frame, text="文档语言:").pack(anchor=tk.W, pady=(0, 5))
+        
+        # 语言选择变量
+        language_var = tk.StringVar(value="both")
+        
+        # 创建单选按钮
+        ttk.Radiobutton(
+            language_frame,
+            text="仅中文",
+            variable=language_var,
+            value="cn"
+        ).pack(anchor=tk.W)
+        
+        ttk.Radiobutton(
+            language_frame,
+            text="仅英文",
+            variable=language_var,
+            value="en"
+        ).pack(anchor=tk.W)
+        
+        ttk.Radiobutton(
+            language_frame,
+            text="中英双语（生成两个文件）",
+            variable=language_var,
+            value="both"
+        ).pack(anchor=tk.W)
         
         # 处理生成文档
         def on_generate():
             try:
                 protocol_name = selected_protocol.get()
+                language = language_var.get()
                 
                 # 检查是否选择了协议
                 if not protocol_name:
@@ -1931,8 +2233,27 @@ class HexParserTool:
                     messagebox.showwarning("警告", f"找不到协议: {protocol_name}")
                     return
                 
-                # 生成文档，固定使用docx格式
-                success, message = self.protocol_manager.generate_protocol_doc(protocol_key, "docx")
+                # 根据语言选择生成文档
+                if language == "both":
+                    # 生成中文文档
+                    cn_success, cn_message = self.protocol_manager.generate_protocol_doc(protocol_key, "docx", "cn")
+                    # 生成英文文档
+                    en_success, en_message = self.protocol_manager.generate_protocol_doc(protocol_key, "docx", "en")
+                    
+                    dialog.destroy()
+                    
+                    if cn_success and en_success:
+                        messagebox.showinfo("成功", "中英文文档均已生成成功")
+                    else:
+                        error_msg = []
+                        if not cn_success:
+                            error_msg.append(f"中文文档生成失败: {cn_message}")
+                        if not en_success:
+                            error_msg.append(f"英文文档生成失败: {en_message}")
+                        messagebox.showerror("错误", "\n".join(error_msg))
+                else:
+                    # 生成单语言文档
+                    success, message = self.protocol_manager.generate_protocol_doc(protocol_key, "docx", language)
                 
                 dialog.destroy()
                 
@@ -2012,74 +2333,72 @@ class HexParserTool:
 
     def _update_parameter_table(self, fields):
         """更新字段表格显示"""
-        # 清除现有表格
+        # 保存所有字段并重置到第一页，然后渲染当前页
+        fields = fields or []
+        self.parameter_all_fields = sorted(fields, key=lambda f: f.get('start_pos', 0))
+        self.param_current_page = 1
+        self._render_parameter_page()
+
+    def _render_parameter_page(self):
+        """根据当前页渲染输出文本"""
+        total = len(self.parameter_all_fields)
+        self.param_total_pages = max(1, (total + self.param_page_size - 1) // self.param_page_size)
+        self.param_current_page = max(1, min(self.param_current_page, self.param_total_pages))
+        start = (self.param_current_page - 1) * self.param_page_size
+        end = min(total, start + self.param_page_size)
+        # 清空现有控件
         for widget in self.parameter_frame.winfo_children():
             widget.destroy()
-            
-        if not fields:
-            # 如果没有字段，显示一个提示信息
-            ttk.Label(self.parameter_frame, text="暂无字段定义").grid(row=0, column=0, sticky="nsew")
-            return
-        
-        # 按照起始位置从小到大排序字段
-        sorted_fields = sorted(fields, key=lambda f: f.get('start_pos', 0))
-            
-        # 创建表格标题
-        headers = ["名称", "类型", "位置", "解析值", "描述"]
-        for col, header in enumerate(headers):
+        # 表头
+        headers = ["字段名", "类型", "位置", "值", "描述"]
+        for i, header in enumerate(headers):
             label = ttk.Label(self.parameter_frame, text=header, relief="ridge")
-            label.grid(row=0, column=col, sticky="nsew")
-            # 表头加粗
-            label.configure(font=('TkDefaultFont', 9, 'bold'))
-            
-        # 存储字段信息和对应的标签组件，用于点击事件处理
-        self.field_labels = []
-        
-        # 添加字段行
-        for row, field in enumerate(sorted_fields, start=1):
-            # 获取字段信息
+            label.grid(row=0, column=i, sticky="nsew", padx=1, pady=1)
+        # 行
+        row_index = 1
+        for field in self.parameter_all_fields[start:end]:
             field_name = field.get('name', '')
             field_type = field.get('type', '')
             start_pos = field.get('start_pos', 0)
             end_pos = field.get('end_pos', 0)
+            position = f"{start_pos}-{end_pos}"
+            value = field.get('value', '') if isinstance(field.get('value', ''), str) else str(field.get('value', ''))
             description = field.get('description', '')
-            
-            # 获取解析值（如果存在）
-            value = field.get('value', '')
-            if value == '':
-                length = end_pos - start_pos + 1
-                value = str(length)  # 如果没有解析值，显示长度
-            else:
-                value = str(value)  # 确保值是字符串
-            
-            # 创建字段信息单元格
+            # 创建标签
             name_label = ttk.Label(self.parameter_frame, text=field_name, relief="ridge", cursor="hand2")
-            name_label.grid(row=row, column=0, sticky="nsew")
-            
             type_label = ttk.Label(self.parameter_frame, text=field_type, relief="ridge", cursor="hand2")
-            type_label.grid(row=row, column=1, sticky="nsew")
-            
-            pos_label = ttk.Label(self.parameter_frame, text=f"{start_pos}-{end_pos}", relief="ridge", cursor="hand2")
-            pos_label.grid(row=row, column=2, sticky="nsew")
-            
+            pos_label = ttk.Label(self.parameter_frame, text=position, relief="ridge", cursor="hand2")
             value_label = ttk.Label(self.parameter_frame, text=value, relief="ridge", cursor="hand2")
-            value_label.grid(row=row, column=3, sticky="nsew")
-            
             desc_label = ttk.Label(self.parameter_frame, text=description, relief="ridge", cursor="hand2")
-            desc_label.grid(row=row, column=4, sticky="nsew")
             
-            # 存储字段信息和对应的标签
-            row_labels = [name_label, type_label, pos_label, value_label, desc_label]
-            field_info = {'start_pos': start_pos, 'end_pos': end_pos, 'name': field_name}
-            self.field_labels.append((row_labels, field_info))
+            # 为每个标签绑定点击事件，实现高亮功能
+            field_info = {
+                'name': field_name,
+                'start_pos': start_pos,
+                'end_pos': end_pos,
+                'type': field_type,
+                'value': value,
+                'description': description
+            }
             
-            # 为每个单元格添加点击事件
-            for label in row_labels:
-                label.bind("<Button-1>", lambda e, f=field_info: self._on_parameter_click(f))
+            # 绑定点击事件到所有标签
+            name_label.bind("<Button-1>", lambda e, info=field_info: self._on_parameter_click(info))
+            type_label.bind("<Button-1>", lambda e, info=field_info: self._on_parameter_click(info))
+            pos_label.bind("<Button-1>", lambda e, info=field_info: self._on_parameter_click(info))
+            value_label.bind("<Button-1>", lambda e, info=field_info: self._on_parameter_click(info))
+            desc_label.bind("<Button-1>", lambda e, info=field_info: self._on_parameter_click(info))
             
-        # 配置网格权重
-        for i in range(len(headers)):
-            self.parameter_frame.grid_columnconfigure(i, weight=1)
+            # 布局
+            name_label.grid(row=row_index, column=0, sticky="nsew", padx=1, pady=1)
+            type_label.grid(row=row_index, column=1, sticky="nsew", padx=1, pady=1)
+            pos_label.grid(row=row_index, column=2, sticky="nsew", padx=1, pady=1)
+            value_label.grid(row=row_index, column=3, sticky="nsew", padx=1, pady=1)
+            desc_label.grid(row=row_index, column=4, sticky="nsew", padx=1, pady=1)
+            row_index += 1
+        # 更新分页控件
+        self.param_page_label.config(text=f"第 {self.param_current_page}/{self.param_total_pages} 页")
+        self.param_prev_btn.config(state=(tk.NORMAL if self.param_current_page > 1 else tk.DISABLED))
+        self.param_next_btn.config(state=(tk.NORMAL if self.param_current_page < self.param_total_pages else tk.DISABLED))
     
     def _on_parameter_click(self, field_info):
         """处理参数表格点击事件，高亮显示对应的报文数据"""
@@ -2146,7 +2465,7 @@ class HexParserTool:
             line_end = offset + bytes_per_line - 1
             
             # 判断字段与当前行是否有交集
-            if not (end_pos < line_start or start_pos > line_end):
+            if not (end_pos < line_start or  start_pos > line_end ):
                 # 计算这一行中需要高亮的字节范围
                 highlight_start = max(start_pos, line_start)
                 highlight_end = min(end_pos, line_end)
@@ -2250,12 +2569,17 @@ class HexParserTool:
                 if isinstance(command, dict):
                     command_id = command.get('protocol_id_hex', '').upper()
                     command_name = command.get('name', '')
+                    command_follow = command.get('follow', '')
                     
                     # 如果有当前报文ID，只显示匹配的命令
                     # 如果没有当前报文ID，显示所有命令
                     if (not current_command_id) or (command_id == current_command_id):
                         if command_id and command_name:
-                            display_name = f"{command_name} (0x{command_id})"
+                            # 在显示名称中添加 follow 信息（如果有）
+                            if command_follow:
+                                display_name = f"{command_name} (0x{command_id}, Follow: {command_follow})"
+                            else:
+                                display_name = f"{command_name} (0x{command_id})"
                             command_values.append(display_name)
                             matching_commands.append(command)
             
@@ -2278,7 +2602,7 @@ class HexParserTool:
         # 创建导入对话框
         dialog = tk.Toplevel(self.root)
         dialog.title("导入JSON文本")
-        dialog.geometry("600x400")
+        dialog.geometry("600x450")
         dialog.grab_set()  # 模态对话框
         
         # 设置图标和样式
@@ -2338,5 +2662,19 @@ class HexParserTool:
 if __name__ == "__main__":
     root = tk.Tk()
     app = HexParserTool(root)
-    root.iconbitmap('2.ico')
+    try:
+        # 尝试使用相对路径加载图标
+        root.iconbitmap('2.ico')
+    except tk.TclError:
+        try:
+            # 尝试使用绝对路径加载图标
+            import os
+            import sys
+            if getattr(sys, 'frozen', False):
+                # 如果是打包后的可执行文件
+                application_path = os.path.dirname(sys.executable)
+                icon_path = os.path.join(application_path, '2.ico')
+                root.iconbitmap(icon_path)
+        except:
+            print("无法加载图标文件，但程序将继续运行")
     root.mainloop()
